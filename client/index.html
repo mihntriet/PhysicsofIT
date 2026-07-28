@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Hệ thống quản lý giám sát và cảnh báo rò rỉ khí gas - Đăng nhập" />
+  <title>Gas Monitor - Đăng nhập</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+  <!-- Styles -->
+  <link rel="stylesheet" href="css/style.css" />
+
+  <!-- Favicon (emoji fallback) -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏭</text></svg>" />
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-container">
+
+      <!-- ═══════════════════════════════════
+           LOGIN SECTION
+           ═══════════════════════════════════ -->
+      <div id="login-section">
+        <div class="login-card">
+          <div class="login-header">
+            <div class="login-logo">🏭</div>
+            <h1>Gas Leak Monitor</h1>
+            <p>Hệ thống giám sát & cảnh báo rò rỉ khí gas</p>
+          </div>
+
+          <div id="login-message" class="form-message"></div>
+
+          <form id="login-form">
+            <div class="form-group">
+              <label for="login-email">Email</label>
+              <input
+                type="email"
+                id="login-email"
+                class="form-input"
+                placeholder="example@email.com"
+                autocomplete="email"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="login-password">Mật khẩu</label>
+              <input
+                type="password"
+                id="login-password"
+                class="form-input"
+                placeholder="Nhập mật khẩu"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+
+            <button type="submit" id="login-btn" class="btn btn-primary">
+              Đăng nhập
+            </button>
+
+            <div class="form-links">
+              <a href="#" id="show-register" class="form-link">Tạo tài khoản mới</a>
+              <a href="#" id="show-reset" class="form-link">Quên mật khẩu?</a>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           REGISTER SECTION
+           ═══════════════════════════════════ -->
+      <div id="register-section" class="hidden">
+        <div class="login-card">
+          <div class="login-header">
+            <div class="login-logo">📝</div>
+            <h1>Đăng ký tài khoản</h1>
+            <p>Tạo tài khoản để sử dụng hệ thống</p>
+          </div>
+
+          <div id="register-message" class="form-message"></div>
+
+          <form id="register-form">
+            <div class="form-group">
+              <label for="register-email">Email</label>
+              <input
+                type="email"
+                id="register-email"
+                class="form-input"
+                placeholder="example@email.com"
+                autocomplete="email"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="register-password">Mật khẩu</label>
+              <input
+                type="password"
+                id="register-password"
+                class="form-input"
+                placeholder="Tối thiểu 6 ký tự"
+                autocomplete="new-password"
+                required
+                minlength="6"
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="register-confirm">Xác nhận mật khẩu</label>
+              <input
+                type="password"
+                id="register-confirm"
+                class="form-input"
+                placeholder="Nhập lại mật khẩu"
+                autocomplete="new-password"
+                required
+              />
+            </div>
+
+            <button type="submit" id="register-btn" class="btn btn-primary">
+              Đăng ký
+            </button>
+
+            <div class="form-links">
+              <a href="#" id="show-login" class="form-link">← Quay lại đăng nhập</a>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════
+           RESET PASSWORD SECTION
+           ═══════════════════════════════════ -->
+      <div id="reset-section" class="hidden">
+        <div class="login-card">
+          <div class="login-header">
+            <div class="login-logo">🔑</div>
+            <h1>Khôi phục mật khẩu</h1>
+            <p>Nhập email để nhận link đặt lại mật khẩu</p>
+          </div>
+
+          <div id="reset-message" class="form-message"></div>
+
+          <form id="reset-form">
+            <div class="form-group">
+              <label for="reset-email">Email</label>
+              <input
+                type="email"
+                id="reset-email"
+                class="form-input"
+                placeholder="example@email.com"
+                autocomplete="email"
+                required
+              />
+            </div>
+
+            <button type="submit" id="reset-btn" class="btn btn-primary">
+              Gửi email khôi phục
+            </button>
+
+            <div class="form-links">
+              <a href="#" id="show-login-from-reset" class="form-link">← Quay lại đăng nhập</a>
+            </div>
+          </form>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Firebase SDK (compat mode cho vanilla JS) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+
+  <!-- App Scripts -->
+  <script src="js/firebase-config.js"></script>
+  <script src="js/auth.js"></script>
+</body>
+</html>
