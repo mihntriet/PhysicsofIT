@@ -1,74 +1,32 @@
-// ============================================================
-// Firebase Database Service
-// ============================================================
-// Đọc/ghi dữ liệu cảm biến gas vào Firebase Realtime Database.
-// Path: /sensor_data/{pushId}
-// ============================================================
+const { admin, getDatabase } = require('../config/firebase');
 
-const { admin } = require('../config/firebase');
+const DEVICE_ID = 'ESP32-GAS-MONITOR';
 
-/**
- * Lưu một data point gas vào Firebase Realtime Database.
- * @param {{ value: number, timestamp: number }} dataPoint
- */
-async function saveGasData(dataPoint) {
-  try {
-    const db = admin.database();
-    const ref = db.ref('sensor_data');
+async function saveGasReading(payload) {
+  const database = getDatabase();
+  const deviceRef = database.ref(`devices/${DEVICE_ID}`);
+  const historyRef = deviceRef.child('readings').push();
 
-    await ref.push({
-      value: dataPoint.value,
-      timestamp: dataPoint.timestamp,
-      datetime: new Date(dataPoint.timestamp).toISOString(),
-    });
-  } catch (error) {
-    // Không crash server nếu Firebase chưa cấu hình
-    if (error.code === 'app/no-app') {
-      // Firebase chưa khởi tạo - im lặng
-      return;
-    }
-    console.error('❌ Error saving gas data to Firebase:', error.message);
+  if (!historyRef.key) {
+    throw new Error('Firebase could not generate a push ID.');
   }
-}
 
-/**
- * Lấy lịch sử dữ liệu gas gần nhất từ Firebase.
- * @param {number} limit - Số lượng records cần lấy (mặc định 50)
- * @returns {Array<{value: number, timestamp: number, datetime: string}>}
- */
-async function getHistory(limit = 50) {
-  try {
-    const db = admin.database();
-    const ref = db.ref('sensor_data');
+  const record = {
+    deviceId: payload.deviceId,
+    gasRaw: payload.gasRaw,
+    alert: payload.alert,
+    ready: payload.ready,
+    timestamp: admin.database.ServerValue.TIMESTAMP,
+  };
 
-    const snapshot = await ref
-      .orderByChild('timestamp')
-      .limitToLast(limit)
-      .once('value');
+  await deviceRef.update({
+    latest: record,
+    [`readings/${historyRef.key}`]: record,
+  });
 
-    const data = [];
-    snapshot.forEach((child) => {
-      data.push({
-        id: child.key,
-        ...child.val(),
-      });
-    });
-
-    // Sắp xếp theo thời gian tăng dần
-    data.sort((a, b) => a.timestamp - b.timestamp);
-
-    return data;
-  } catch (error) {
-    if (error.code === 'app/no-app') {
-      console.warn('⚠️  Firebase not initialized. Returning empty history.');
-      return [];
-    }
-    console.error('❌ Error fetching gas history from Firebase:', error.message);
-    return [];
-  }
+  return historyRef.key;
 }
 
 module.exports = {
-  saveGasData,
-  getHistory,
+  saveGasReading,
 };

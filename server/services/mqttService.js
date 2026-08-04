@@ -1,189 +1,120 @@
-// ============================================================
-// MQTT Service
-// ============================================================
-// Quản lý kết nối MQTT Broker, subscribe/publish messages.
-// - Subscribe: Nhận dữ liệu gas từ ESP32
-// - Publish: Gửi lệnh điều khiển Buzzer/LED xuống ESP32
-// ============================================================
-
 const mqtt = require('mqtt');
 const firebaseService = require('./firebaseService');
-const alertService = require('./alertService');
+
+const EXPECTED_DEVICE_ID = 'ESP32-GAS-MONITOR';
 
 let mqttClient = null;
-let io = null; // Socket.io instance - được inject từ server.js
-let latestGasValue = 0;
-let deviceStates = {
-  buzzer: 'OFF',
-  led: 'OFF',
-};
 
-/**
- * Khởi tạo kết nối MQTT và đăng ký lắng nghe topics.
- * @param {object} socketIO - Socket.io server instance
- */
-function init(socketIO) {
-  io = socketIO;
+function validatePayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return 'payload must be a JSON object';
+  }
 
-  const brokerUrl = process.env.MQTT_BROKER_URL || 'mqtt://broker.hivemq.com';
-  const topicGasData = process.env.MQTT_TOPIC_GAS_DATA || 'gas/sensor/data';
+  if (payload.deviceId !== EXPECTED_DEVICE_ID) {
+    return `deviceId must be ${EXPECTED_DEVICE_ID}`;
+  }
 
-  console.log(`🔌 Connecting to MQTT Broker: ${brokerUrl}`);
+  if (typeof payload.gasRaw !== 'number'
+      || !Number.isFinite(payload.gasRaw)
+      || payload.gasRaw < 0) {
+    return 'gasRaw must be a finite, non-negative number';
+  }
+
+  if (typeof payload.alert !== 'boolean') {
+    return 'alert must be a boolean';
+  }
+
+  if (typeof payload.ready !== 'boolean') {
+    return 'ready must be a boolean';
+  }
+
+  return null;
+}
+
+async function handleGasData(message) {
+  let payload;
+
+  try {
+    payload = JSON.parse(message.toString('utf8'));
+  } catch (error) {
+    console.error(`Invalid MQTT payload: malformed JSON (${error.message}).`);
+    return;
+  }
+
+  const validationError = validatePayload(payload);
+  if (validationError) {
+    console.error(`Invalid MQTT payload: ${validationError}.`);
+    return;
+  }
+
+  try {
+    const pushId = await firebaseService.saveGasReading(payload);
+    console.log(`Saved gas reading to Firebase (pushId: ${pushId}).`);
+  } catch (error) {
+    console.error(`Failed to save gas reading to Firebase: ${error.message}`);
+  }
+}
+
+function init() {
+  if (mqttClient) {
+    return mqttClient;
+  }
+
+  const brokerUrl = process.env.MQTT_BROKER_URL;
+  const gasDataTopic = process.env.MQTT_TOPIC_GAS_DATA;
+
+  if (!brokerUrl) {
+    throw new Error('Missing MQTT_BROKER_URL environment variable.');
+  }
+
+  if (!gasDataTopic) {
+    throw new Error('Missing MQTT_TOPIC_GAS_DATA environment variable.');
+  }
 
   mqttClient = mqtt.connect(brokerUrl, {
-    clientId: `gas_monitor_server_${Date.now()}`,
     clean: true,
     connectTimeout: 10000,
     reconnectPeriod: 5000,
   });
 
-  // ── Sự kiện kết nối thành công ──
   mqttClient.on('connect', () => {
-    console.log('✅ Connected to MQTT Broker');
+    console.log(`Connected to MQTT broker: ${brokerUrl}`);
 
-    // Subscribe topic nhận dữ liệu gas từ ESP32
-    mqttClient.subscribe(topicGasData, { qos: 1 }, (err) => {
-      if (err) {
-        console.error('❌ Failed to subscribe:', topicGasData, err);
-      } else {
-        console.log(`📡 Subscribed to: ${topicGasData}`);
+    mqttClient.subscribe(gasDataTopic, { qos: 1 }, (error) => {
+      if (error) {
+        console.error(`Failed to subscribe to ${gasDataTopic}: ${error.message}`);
+        return;
       }
+
+      console.log(`Subscribed to MQTT topic: ${gasDataTopic}`);
     });
   });
 
-  // ── Xử lý khi nhận message ──
   mqttClient.on('message', (topic, message) => {
-    const topicGas = process.env.MQTT_TOPIC_GAS_DATA || 'gas/sensor/data';
-
-    if (topic === topicGas) {
-      handleGasData(message.toString());
-    }
-  });
-
-  // ── Xử lý lỗi ──
-  mqttClient.on('error', (err) => {
-    console.error('❌ MQTT Error:', err.message);
-  });
-
-  mqttClient.on('reconnect', () => {
-    console.log('🔄 Reconnecting to MQTT Broker...');
-  });
-
-  mqttClient.on('offline', () => {
-    console.warn('⚠️  MQTT Client is offline');
-  });
-}
-
-/**
- * Xử lý dữ liệu gas nhận từ ESP32.
- * Luồng: Parse JSON → Cập nhật UI (Socket.io) → Lưu Firebase → Kiểm tra ngưỡng
- * @param {string} payload - JSON string: {"value": 1234} hoặc raw number
- */
-function handleGasData(payload) {
-  try {
-    let gasValue;
-    const timestamp = Date.now();
-
-    // Hỗ trợ cả JSON và raw number
-    try {
-      const parsed = JSON.parse(payload);
-      gasValue = parsed.value !== undefined ? Number(parsed.value) : Number(parsed);
-    } catch {
-      gasValue = Number(payload);
-    }
-
-    if (isNaN(gasValue)) {
-      console.warn('⚠️  Invalid gas data received:', payload);
+    if (topic !== gasDataTopic) {
       return;
     }
 
-    latestGasValue = gasValue;
-    const dataPoint = { value: gasValue, timestamp };
-
-    console.log(`🌡️  Gas Value: ${gasValue} (ADC)`);
-
-    // 1) Emit real-time đến tất cả client qua Socket.io
-    if (io) {
-      io.emit('gas-data', dataPoint);
-    }
-
-    // 2) Lưu vào Firebase Database
-    firebaseService.saveGasData(dataPoint);
-
-    // 3) Kiểm tra ngưỡng cảnh báo
-    const isAlert = alertService.checkThreshold(gasValue);
-    if (isAlert && io) {
-      io.emit('gas-alert', {
-        value: gasValue,
-        threshold: alertService.getThreshold(),
-        timestamp,
-        message: `⚠️ CẢNH BÁO: Nồng độ gas vượt ngưỡng! (${gasValue} > ${alertService.getThreshold()})`,
-      });
-    }
-  } catch (error) {
-    console.error('❌ Error handling gas data:', error.message);
-  }
-}
-
-/**
- * Publish lệnh điều khiển thiết bị qua MQTT.
- * @param {'buzzer'|'led'} device - Thiết bị cần điều khiển
- * @param {'ON'|'OFF'} state - Trạng thái mong muốn
- * @returns {boolean} Thành công hay không
- */
-function controlDevice(device, state) {
-  if (!mqttClient || !mqttClient.connected) {
-    console.error('❌ MQTT Client is not connected');
-    return false;
-  }
-
-  const topics = {
-    buzzer: process.env.MQTT_TOPIC_CONTROL_BUZZER || 'gas/control/buzzer',
-    led: process.env.MQTT_TOPIC_CONTROL_LED || 'gas/control/led',
-  };
-
-  const topic = topics[device];
-  if (!topic) {
-    console.error(`❌ Unknown device: ${device}`);
-    return false;
-  }
-
-  const normalizedState = state.toUpperCase() === 'ON' ? 'ON' : 'OFF';
-
-  mqttClient.publish(topic, normalizedState, { qos: 1 }, (err) => {
-    if (err) {
-      console.error(`❌ Failed to publish to ${topic}:`, err);
-    } else {
-      console.log(`📤 Published: ${topic} → ${normalizedState}`);
-      deviceStates[device] = normalizedState;
-
-      // Thông báo trạng thái mới đến tất cả clients
-      if (io) {
-        io.emit('device-state', { device, state: normalizedState });
-      }
-    }
+    void handleGasData(message);
   });
 
-  return true;
-}
+  mqttClient.on('reconnect', () => {
+    console.log('Reconnecting to MQTT broker...');
+  });
 
-/**
- * Lấy giá trị gas mới nhất.
- */
-function getLatestGasValue() {
-  return latestGasValue;
-}
+  mqttClient.on('offline', () => {
+    console.warn('MQTT client is offline.');
+  });
 
-/**
- * Lấy trạng thái các thiết bị.
- */
-function getDeviceStates() {
-  return { ...deviceStates };
+  mqttClient.on('error', (error) => {
+    console.error(`MQTT error: ${error.message}`);
+  });
+
+  return mqttClient;
 }
 
 module.exports = {
   init,
-  controlDevice,
-  getLatestGasValue,
-  getDeviceStates,
+  handleGasData,
+  validatePayload,
 };
