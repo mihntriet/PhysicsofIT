@@ -16,3 +16,10 @@ Thumbs.db
 *.log
 
 server/config/firebase-config.js
+
+node_modules/
+serviceAccountKey.json
+
+server/node_modules/
+server/.env
+server/config/serviceAccountKey.json

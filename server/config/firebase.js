@@ -1,36 +1,65 @@
-// ============================================================
-// Firebase Admin SDK Configuration
-// ============================================================
-// Khởi tạo Firebase Admin để server có quyền đọc/ghi database
-// mà không cần auth token từ client.
-// ============================================================
-
-const admin = require('firebase-admin');
+const fs = require('fs');
 const path = require('path');
+const admin = require('firebase-admin');
 
-/**
- * Khởi tạo Firebase Admin SDK.
- * Đọc Service Account Key từ file JSON được chỉ định trong .env
- */
+let database = null;
+
+function resolveServiceAccountPath(configuredPath) {
+  if (path.isAbsolute(configuredPath)) {
+    return configuredPath;
+  }
+
+  return path.resolve(__dirname, '..', configuredPath);
+}
+
 function initializeFirebase() {
+  if (database) {
+    return database;
+  }
+
+  const configuredPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
+  const databaseURL = process.env.FIREBASE_DATABASE_URL;
+
+  if (!configuredPath) {
+    throw new Error('Missing FIREBASE_SERVICE_ACCOUNT_PATH environment variable.');
+  }
+
+  if (!databaseURL) {
+    throw new Error('Missing FIREBASE_DATABASE_URL environment variable.');
+  }
+
+  const serviceAccountPath = resolveServiceAccountPath(configuredPath);
+
   try {
-    const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
-      || './config/serviceAccountKey.json';
+    const serviceAccount = JSON.parse(
+      fs.readFileSync(serviceAccountPath, 'utf8')
+    );
 
-    const serviceAccount = require(path.resolve(serviceAccountPath));
+    const app = admin.apps.length > 0
+      ? admin.app()
+      : admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount),
+        databaseURL,
+      });
 
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
-      databaseURL: process.env.FIREBASE_DATABASE_URL,
-    });
-
-    console.log('✅ Firebase Admin SDK initialized successfully');
+    database = app.database();
+    console.log('Firebase Admin SDK initialized.');
+    return database;
   } catch (error) {
-    console.error('❌ Firebase Admin SDK initialization failed:', error.message);
-    console.warn('⚠️  Server will run without Firebase. Data will NOT be persisted.');
-    console.warn('   → Download Service Account Key from Firebase Console');
-    console.warn('   → Place it at: server/config/serviceAccountKey.json');
+    throw new Error(`Firebase initialization failed: ${error.message}`);
   }
 }
 
-module.exports = { admin, initializeFirebase };
+function getDatabase() {
+  if (!database) {
+    throw new Error('Firebase has not been initialized.');
+  }
+
+  return database;
+}
+
+module.exports = {
+  admin,
+  initializeFirebase,
+  getDatabase,
+};
