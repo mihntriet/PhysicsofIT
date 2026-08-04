@@ -1,65 +1,74 @@
-const fs = require('fs');
-const path = require('path');
-const admin = require('firebase-admin');
+// ============================================================
+// Firebase Admin SDK Configuration
+// ============================================================
 
-let database = null;
+const admin = require("firebase-admin");
+const path = require("path");
+const fs = require("fs");
 
+/**
+ * Khởi tạo Firebase Admin SDK và trả về Realtime Database.
+ *
+ * @returns {admin.database.Database}
+ */
+function initializeFirebase() {
+  // Tránh khởi tạo Firebase nhiều lần
+  if (admin.apps.length > 0) {
+    return admin.database();
+  }
+
+  const databaseURL = process.env.FIREBASE_DATABASE_URL;
+
+  if (!databaseURL) {
+    throw new Error(
+      "Thiếu FIREBASE_DATABASE_URL trong file server/.env"
+    );
+  }
+
+  /*
+   * Mặc định file khóa nằm tại:
+   * server/config/serviceAccountKey.json
+   *
+   * Không bắt buộc phải khai báo đường dẫn trong .env.
+   */
+  const serviceAccountPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+    ? resolveServiceAccountPath(
+        process.env.FIREBASE_SERVICE_ACCOUNT_PATH
+      )
+    : path.join(__dirname, "serviceAccountKey.json");
+
+  if (!fs.existsSync(serviceAccountPath)) {
+    throw new Error(
+      `Không tìm thấy Firebase Service Account tại: ${serviceAccountPath}`
+    );
+  }
+
+  const serviceAccount = require(serviceAccountPath);
+
+  admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    databaseURL
+  });
+
+  console.log("Firebase Admin SDK initialized successfully");
+  console.log(`Realtime Database: ${databaseURL}`);
+
+  return admin.database();
+}
+
+/**
+ * Xử lý đường dẫn được khai báo trong .env.
+ * Đường dẫn tương đối được tính từ thư mục server/.
+ */
 function resolveServiceAccountPath(configuredPath) {
   if (path.isAbsolute(configuredPath)) {
     return configuredPath;
   }
 
-  return path.resolve(__dirname, '..', configuredPath);
-}
-
-function initializeFirebase() {
-  if (database) {
-    return database;
-  }
-
-  const configuredPath = process.env.FIREBASE_SERVICE_ACCOUNT_PATH;
-  const databaseURL = process.env.FIREBASE_DATABASE_URL;
-
-  if (!configuredPath) {
-    throw new Error('Missing FIREBASE_SERVICE_ACCOUNT_PATH environment variable.');
-  }
-
-  if (!databaseURL) {
-    throw new Error('Missing FIREBASE_DATABASE_URL environment variable.');
-  }
-
-  const serviceAccountPath = resolveServiceAccountPath(configuredPath);
-
-  try {
-    const serviceAccount = JSON.parse(
-      fs.readFileSync(serviceAccountPath, 'utf8')
-    );
-
-    const app = admin.apps.length > 0
-      ? admin.app()
-      : admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        databaseURL,
-      });
-
-    database = app.database();
-    console.log('Firebase Admin SDK initialized.');
-    return database;
-  } catch (error) {
-    throw new Error(`Firebase initialization failed: ${error.message}`);
-  }
-}
-
-function getDatabase() {
-  if (!database) {
-    throw new Error('Firebase has not been initialized.');
-  }
-
-  return database;
+  return path.resolve(__dirname, "..", configuredPath);
 }
 
 module.exports = {
   admin,
-  initializeFirebase,
-  getDatabase,
+  initializeFirebase
 };
