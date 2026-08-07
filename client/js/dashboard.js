@@ -10,28 +10,32 @@
 
 document.addEventListener('DOMContentLoaded', () => {
   // ── Kiểm tra Auth ──
+  // TODO: Hiếu bật lại đoạn code Auth kiểm tra Firebase bên dưới khi hoàn thiện firebase-config.js
+  /*
   auth.onAuthStateChanged((user) => {
     if (!user) {
       window.location.href = '/';
       return;
     }
-    // Hiển thị email user
     const userEmailEl = document.getElementById('user-email');
     if (userEmailEl) {
       userEmailEl.textContent = user.email;
     }
-    initDashboard();
   });
-
-  // ── Đăng xuất ──
-  const logoutBtn = document.getElementById('logout-btn');
-  if (logoutBtn) {
-    logoutBtn.addEventListener('click', async () => {
-      await auth.signOut();
-      window.location.href = '/';
-    });
-  }
+  */
+  initDashboard();
 });
+
+
+//   // ── Đăng xuất ──
+//   const logoutBtn = document.getElementById('logout-btn');
+//   if (logoutBtn) {
+//     logoutBtn.addEventListener('click', async () => {
+//       await auth.signOut();
+//       window.location.href = '/';
+//     });
+//   }
+// });
 
 // ══════════════════════════════════════════
 // GLOBAL STATE
@@ -70,11 +74,10 @@ async function initDashboard() {
 }
 
 // ══════════════════════════════════════════
-// SOCKET.IO - REAL-TIME DATA
+// SOCKET.IO - REAL-TIME DATA (update_gas_data)
 // ══════════════════════════════════════════
 
 function initSocketIO() {
-  // Kết nối đến server (same origin)
   socket = io();
 
   const statusDot = document.getElementById('status-dot');
@@ -82,28 +85,27 @@ function initSocketIO() {
 
   socket.on('connect', () => {
     console.log('✅ Socket.io connected');
-    if (statusDot) {
-      statusDot.className = 'status-dot connected';
-    }
-    if (statusText) {
-      statusText.textContent = 'Đã kết nối';
-    }
+    if (statusDot) statusDot.className = 'status-dot connected';
+    if (statusText) statusText.textContent = 'Đã kết nối';
   });
 
   socket.on('disconnect', () => {
     console.warn('🔴 Socket.io disconnected');
-    if (statusDot) {
-      statusDot.className = 'status-dot disconnected';
-    }
-    if (statusText) {
-      statusText.textContent = 'Mất kết nối';
-    }
+    if (statusDot) statusDot.className = 'status-dot disconnected';
+    if (statusText) statusText.textContent = 'Mất kết nối';
   });
 
-  // ── Nhận dữ liệu gas real-time ──
+  // ── Lắng nghe sự kiện update_gas_data từ Server ──
+  socket.on('update_gas_data', (data) => {
+    const val = data.gas_level !== undefined ? data.gas_level : data.value;
+    updateGasDisplay(val);
+    addChartDataPoint(val, data.timestamp || Date.now());
+  });
+
   socket.on('gas-data', (data) => {
-    updateGasDisplay(data.value);
-    addChartDataPoint(data.value, data.timestamp);
+    const val = data.gas_level !== undefined ? data.gas_level : data.value;
+    updateGasDisplay(val);
+    addChartDataPoint(val, data.timestamp || Date.now());
   });
 
   // ── Nhận trạng thái thiết bị ──
@@ -111,10 +113,17 @@ function initSocketIO() {
     updateDeviceUI(data.device, data.state);
   });
 
+  socket.on('buzzer_state_changed', (data) => {
+    const state = typeof data === 'object' ? data.state : data;
+    updateDeviceUI('buzzer', state);
+    showToast(`Còi Buzzer thực tế: ${state === 'ON' ? 'ĐÃ BẬT' : 'ĐÃ TẮT'}`, state === 'ON' ? 'error' : 'success');
+  });
+
   socket.on('device-state-all', (states) => {
     if (states.buzzer) updateDeviceUI('buzzer', states.buzzer);
     if (states.led) updateDeviceUI('led', states.led);
   });
+
 
   // ── Nhận cảnh báo gas ──
   socket.on('gas-alert', (data) => {
@@ -164,26 +173,35 @@ function updateGasDisplay(value) {
 }
 
 // ══════════════════════════════════════════
-// DEVICE CONTROLS
+// DEVICE CONTROLS (Single Source of Truth / IoT)
 // ══════════════════════════════════════════
 
 function initControls() {
-  // ── Buzzer Toggle ──
+  // ── Buzzer Toggle (Chức năng cb2 - Non-Optimistic UI) ──
   const buzzerToggle = document.getElementById('buzzer-toggle');
   if (buzzerToggle) {
-    buzzerToggle.addEventListener('change', async () => {
-      const state = buzzerToggle.checked ? 'ON' : 'OFF';
+    buzzerToggle.addEventListener('click', async (e) => {
+      // Ngăn công tắc tự đổi trạng thái UI ngay lập tức
+      e.preventDefault();
+
+      // Lấy trạng thái mong muốn (đảo ngược trạng thái hiện tại)
+      const targetState = buzzerToggle.checked ? 'OFF' : 'ON';
+
       try {
-        const result = await controlBuzzer(state);
+        const response = await fetch('/api/control/buzzer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ state: targetState })
+        });
+        const result = await response.json();
+
         if (result.success) {
-          showToast(`Còi Buzzer: ${state === 'ON' ? 'ĐÃ BẬT' : 'ĐÃ TẮT'}`, 'success');
+          showToast(`Đã gửi lệnh ${targetState} tới Còi Buzzer, đang chờ xác nhận...`, 'warning');
         } else {
-          showToast('Không thể điều khiển Buzzer', 'error');
-          buzzerToggle.checked = !buzzerToggle.checked;
+          showToast('Không thể gửi lệnh tới Buzzer', 'error');
         }
       } catch (err) {
         showToast('Lỗi kết nối server', 'error');
-        buzzerToggle.checked = !buzzerToggle.checked;
       }
     });
   }
@@ -209,19 +227,32 @@ function initControls() {
   }
 }
 
+/**
+ * Cập nhật giao diện thiết bị khi nhận xác nhận từ phần cứng / Socket.io
+ */
 function updateDeviceUI(device, state) {
   const toggle = document.getElementById(`${device}-toggle`);
   const statusEl = document.getElementById(`${device}-status-text`);
 
+  const normalizedState = (state || '').toUpperCase();
+
   if (toggle) {
-    toggle.checked = state === 'ON';
+    toggle.checked = (normalizedState === 'ON');
   }
 
   if (statusEl) {
-    statusEl.textContent = state === 'ON' ? 'ĐANG BẬT' : 'ĐANG TẮT';
-    statusEl.className = `status-text ${state === 'ON' ? 'on' : 'off'}`;
+    if (normalizedState === 'ON') {
+      statusEl.textContent = 'ĐANG BẬT';
+      statusEl.style.color = '#ff4444'; // Màu đỏ cảnh báo khi còi BẬT
+      statusEl.style.fontWeight = '700';
+    } else {
+      statusEl.textContent = 'ĐANG TẮT';
+      statusEl.style.color = 'var(--text-muted)'; // Màu xám khi TẮT
+      statusEl.style.fontWeight = '600';
+    }
   }
 }
+
 
 // ══════════════════════════════════════════
 // CHART.JS - BIỂU ĐỒ LỊCH SỬ
@@ -336,11 +367,11 @@ async function initChart() {
       scales: {
         x: {
           grid: {
-            color: 'rgba(255, 255, 255, 0.04)',
-            drawBorder: false,
+            color: 'rgba(255, 255, 255, 0.1)',
+            drawBorder: true,
           },
           ticks: {
-            color: '#64748b',
+            color: '#94a3b8',
             font: { size: 10 },
             maxRotation: 45,
             maxTicksLimit: 12,
@@ -350,16 +381,17 @@ async function initChart() {
           min: 0,
           max: 4095,
           grid: {
-            color: 'rgba(255, 255, 255, 0.04)',
-            drawBorder: false,
+            color: 'rgba(255, 255, 255, 0.1)',
+            drawBorder: true,
           },
           ticks: {
-            color: '#64748b',
+            color: '#94a3b8',
             font: { size: 11 },
             stepSize: 500,
           },
         },
       },
+
       animation: {
         duration: 500,
         easing: 'easeOutQuart',
@@ -510,10 +542,106 @@ document.addEventListener('click', async (e) => {
         })
       );
       gasChart.data.datasets[0].data = history.data.map((d) => d.value);
-      gasChart.data.datasets[1].data = history.data.map(() => gasThreshold);
-      gasChart.update();
+
+// ══════════════════════════════════════════
+// WIFI CONFIG DYNAMIC STATE MANAGEMENT (ID: nc12)
+// ══════════════════════════════════════════
+
+/**
+ * Cập nhật giao diện Wi-Fi động theo thời gian thực.
+ * @param {{ isConnected: boolean, ssid?: string, ip?: string }} data
+ */
+function updateWifiStatus(data) {
+  const ssidEl = document.getElementById('wifi-ssid');
+  const ipEl = document.getElementById('wifi-ip');
+  const statusEl = document.getElementById('wifi-status');
+  const statusBadge = document.getElementById('wifi-status-badge');
+  const statusDot = document.getElementById('wifi-status-dot');
+  const btnReset = document.getElementById('btn-reset-wifi');
+
+  if (!statusEl || !btnReset) return;
+
+  if (data && data.isConnected) {
+    // ── Đã kết nối WiFi ──
+    if (ssidEl) {
+      ssidEl.textContent = data.ssid || 'N/A';
+      ssidEl.style.color = '#60a5fa'; // Blue accent
     }
-  } catch (err) {
-    showToast('Không thể tải dữ liệu lịch sử', 'error');
+    if (ipEl) {
+      ipEl.textContent = data.ip || 'N/A';
+      ipEl.style.color = 'var(--text-primary)';
+    }
+
+    statusEl.textContent = 'ĐÃ KẾT NỐI';
+    if (statusBadge) statusBadge.style.color = 'var(--accent)';
+    if (statusDot) {
+      statusDot.style.background = 'var(--accent)';
+      statusDot.style.boxShadow = '0 0 8px var(--accent-glow)';
+    }
+
+    // Enable nút Cấu hình lại
+    btnReset.disabled = false;
+    btnReset.style.opacity = '1';
+    btnReset.style.cursor = 'pointer';
+  } else {
+    // ── Chưa kết nối / Mất kết nối ──
+    if (ssidEl) {
+      ssidEl.textContent = 'N/A';
+      ssidEl.style.color = 'var(--text-muted)';
+    }
+    if (ipEl) {
+      ipEl.textContent = 'N/A';
+      ipEl.style.color = 'var(--text-muted)';
+    }
+
+    statusEl.textContent = 'CHƯA KẾT NỐI';
+    if (statusBadge) statusBadge.style.color = 'var(--danger)';
+    if (statusDot) {
+      statusDot.style.background = 'var(--danger)';
+      statusDot.style.boxShadow = '0 0 8px var(--danger-glow)';
+    }
+
+    // Disable (làm mờ) nút Cấu hình lại
+    btnReset.disabled = true;
+    btnReset.style.opacity = '0.5';
+    btnReset.style.cursor = 'not-allowed';
   }
-});
+}
+
+/**
+ * Sự kiện bấm nút "Cấu hình lại mạng"
+ */
+async function resetWifiConfig() {
+  const confirmMessage = "Bạn có chắc chắn muốn cấu hình lại mạng?\n\nThiết bị sẽ ngắt kết nối hiện tại, phát WiFi nội bộ. Bạn cần dùng điện thoại kết nối vào WiFi của thiết bị và truy cập 192.168.4.1 để nhập mật khẩu mới.";
+
+  if (confirm(confirmMessage)) {
+    console.log("Đã gửi lệnh ngắt mạng xuống ESP32");
+
+    // Đưa giao diện về trạng thái chờ ngắt kết nối ngay lập tức
+    updateWifiStatus({ isConnected: false });
+
+    // Gửi API / Socket message ngắt kết nối xuống server/ESP32
+    try {
+      if (socket) {
+        socket.emit('control-command', { command: 'reset_wifi' });
+      }
+      await fetch('/api/control/wifi-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'reset_wifi' })
+      });
+    } catch (err) {
+      console.warn("Lệnh ngắt mạng đã xử lý trên giao diện.", err);
+    }
+  }
+}
+
+// ── Real-time Socket.io Listening ──
+// Lắng nghe sự kiện "wifi-status" từ Backend khi ESP32 thực sự kết nối / ngắt kết nối
+if (typeof socket !== 'undefined' && socket) {
+  socket.on('wifi-status', (data) => {
+    updateWifiStatus(data);
+  });
+}
+
+

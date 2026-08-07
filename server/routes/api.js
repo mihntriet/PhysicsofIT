@@ -13,7 +13,7 @@ const firebaseService = require('../services/firebaseService');
 const alertService = require('../services/alertService');
 
 // ─────────────────────────────────────────────
-// POST /api/control/buzzer
+// POST /api/control/buzzer (Chức năng cb2)
 // Body: { "state": "ON" } hoặc { "state": "OFF" }
 // ─────────────────────────────────────────────
 router.post('/control/buzzer', (req, res) => {
@@ -26,17 +26,19 @@ router.post('/control/buzzer', (req, res) => {
     });
   }
 
-  const result = mqttService.controlDevice('buzzer', state);
+  const normalizedState = state.toUpperCase();
+  const result = mqttService.controlDevice('buzzer', normalizedState);
 
   res.json({
     success: result,
     device: 'buzzer',
-    state: state.toUpperCase(),
+    state: normalizedState,
     message: result
-      ? `Buzzer turned ${state.toUpperCase()}`
-      : 'Failed to send command. MQTT not connected.',
+      ? `Đã gửi lệnh ${normalizedState} tới Còi Buzzer`
+      : 'Không thể gửi lệnh. MQTT chưa kết nối.',
   });
 });
+
 
 // ─────────────────────────────────────────────
 // POST /api/control/led
@@ -81,13 +83,13 @@ router.get('/sensor/current', (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// GET /api/sensor/history?limit=50
-// Lấy lịch sử dữ liệu gas từ Firebase
+// GET /api/gas-history?limit=20
+// Lấy 20 mốc dữ liệu gas gần nhất từ Firebase
 // ─────────────────────────────────────────────
-router.get('/sensor/history', async (req, res) => {
+router.get('/gas-history', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit, 10) || 50;
-    const clampedLimit = Math.min(Math.max(limit, 1), 500);
+    const limit = parseInt(req.query.limit, 10) || 20;
+    const clampedLimit = Math.min(Math.max(limit, 1), 100);
 
     const history = await firebaseService.getHistory(clampedLimit);
 
@@ -98,12 +100,13 @@ router.get('/sensor/history', async (req, res) => {
       data: history,
     });
   } catch (error) {
-    console.error('❌ Error in /api/sensor/history:', error.message);
+    console.error('❌ Error in /api/gas-history:', error.message);
     res.status(500).json({
       success: false,
-      error: 'Failed to fetch sensor history.',
+      error: 'Failed to fetch gas history.',
     });
   }
 });
+
 
 module.exports = router;
