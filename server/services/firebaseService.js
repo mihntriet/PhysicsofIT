@@ -1,32 +1,68 @@
-const { admin, getDatabase } = require('../config/firebase');
+// ============================================================
+// Firebase Database Service
+// ============================================================
+// Đọc/ghi dữ liệu cảm biến gas vào Firebase Realtime Database.
+// Path: /gas_history/{pushId}
+// ============================================================
 
-const DEVICE_ID = 'ESP32-GAS-MONITOR';
+const { admin } = require('../config/firebase');
 
-async function saveGasReading(payload) {
-  const database = getDatabase();
-  const deviceRef = database.ref(`devices/${DEVICE_ID}`);
-  const historyRef = deviceRef.child('readings').push();
+/**
+ * Lưu một data point gas vào node `gas_history` trong Firebase.
+ * @param {{ gas_level: number, timestamp: number }} dataPoint
+ */
+async function saveGasData(dataPoint) {
+  try {
+    const db = admin.database();
+    const ref = db.ref('gas_history');
 
-  if (!historyRef.key) {
-    throw new Error('Firebase could not generate a push ID.');
+    await ref.push({
+      gas_level: dataPoint.gas_level,
+      timestamp: dataPoint.timestamp || Date.now(),
+      datetime: new Date(dataPoint.timestamp || Date.now()).toISOString(),
+    });
+  } catch (error) {
+    if (error.code === 'app/no-app') return;
+    console.error('❌ Error saving gas data to Firebase:', error.message);
   }
+}
 
-  const record = {
-    deviceId: payload.deviceId,
-    gasRaw: payload.gasRaw,
-    alert: payload.alert,
-    ready: payload.ready,
-    timestamp: admin.database.ServerValue.TIMESTAMP,
-  };
+/**
+ * Lấy lịch sử dữ liệu gas gần nhất từ node `gas_history`.
+ * @param {number} limit - Số lượng records cần lấy (mặc định 20)
+ * @returns {Array<{gas_level: number, timestamp: number, datetime: string}>}
+ */
+async function getHistory(limit = 20) {
+  try {
+    const db = admin.database();
+    const ref = db.ref('gas_history');
 
-  await deviceRef.update({
-    latest: record,
-    [`readings/${historyRef.key}`]: record,
-  });
+    const snapshot = await ref
+      .orderByChild('timestamp')
+      .limitToLast(limit)
+      .once('value');
 
-  return historyRef.key;
+    const data = [];
+    snapshot.forEach((child) => {
+      const val = child.val();
+      data.push({
+        id: child.key,
+        gas_level: val.gas_level !== undefined ? val.gas_level : val.value,
+        timestamp: val.timestamp,
+        datetime: val.datetime,
+      });
+    });
+
+    data.sort((a, b) => a.timestamp - b.timestamp);
+    return data;
+  } catch (error) {
+    if (error.code === 'app/no-app') return [];
+    console.error('❌ Error fetching gas history from Firebase:', error.message);
+    return [];
+  }
 }
 
 module.exports = {
-  saveGasReading,
+  saveGasData,
+  getHistory,
 };

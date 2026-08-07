@@ -1,18 +1,20 @@
 const mqtt = require('mqtt');
 const firebaseService = require('./firebaseService');
-
-const EXPECTED_DEVICE_ID = 'ESP32-GAS-MONITOR';
+const alertService = require('./alertService');
 
 let mqttClient = null;
+let io = null;
+let latestGasValue = 0;
+let deviceStates = {
+  buzzer: 'OFF',
+  led: 'OFF',
+};
 
 function validatePayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return 'payload must be a JSON object';
   }
 
-  if (payload.deviceId !== EXPECTED_DEVICE_ID) {
-    return `deviceId must be ${EXPECTED_DEVICE_ID}`;
-  }
 
   if (typeof payload.gasRaw !== 'number'
       || !Number.isFinite(payload.gasRaw)
@@ -31,29 +33,63 @@ function validatePayload(payload) {
   return null;
 }
 
-async function handleGasData(message) {
-  let payload;
-
+/**
+ * Xử lý dữ liệu gas nhận từ ESP32.
+ * Luồng: Parse JSON -> Emit Socket.io 'update_gas_data' -> Lưu Firebase -> Kiểm tra ngưỡng
+ * @param {string} payload - JSON string: {"gas_level": 1250}
+ */
+function handleGasData(payload) {
   try {
-    payload = JSON.parse(message.toString('utf8'));
-  } catch (error) {
-    console.error(`Invalid MQTT payload: malformed JSON (${error.message}).`);
-    return;
-  }
+    let gasLevel;
+    const timestamp = Date.now();
 
-  const validationError = validatePayload(payload);
-  if (validationError) {
-    console.error(`Invalid MQTT payload: ${validationError}.`);
-    return;
-  }
+    try {
+      const parsed = JSON.parse(payload);
+      if (parsed.gas_level !== undefined) {
+        gasLevel = Number(parsed.gas_level);
+      } else if (parsed.value !== undefined) {
+        gasLevel = Number(parsed.value);
+      } else {
+        gasLevel = Number(payload);
+      }
+    } catch {
+      gasLevel = Number(payload);
+    }
 
-  try {
-    const pushId = await firebaseService.saveGasReading(payload);
-    console.log(`Saved gas reading to Firebase (pushId: ${pushId}).`);
+    if (isNaN(gasLevel)) {
+      console.warn('⚠️ Invalid gas data received:', payload);
+      return;
+    }
+
+    latestGasValue = gasLevel;
+    const dataPoint = { gas_level: gasLevel, timestamp };
+
+    console.log(`🌡️ Gas Level: ${gasLevel} (ADC)`);
+
+    // 1) Việc 1: Emit real-time qua Socket.io tên `update_gas_data`
+    if (io) {
+      io.emit('update_gas_data', dataPoint);
+      io.emit('gas-data', { value: gasLevel, timestamp });
+    }
+
+    // 2) Việc 2: Lưu vào node gas_history trong Firebase
+    firebaseService.saveGasData(dataPoint);
+
+    // 3) Kiểm tra ngưỡng cảnh báo
+    const isAlert = alertService.checkThreshold(gasLevel);
+    if (isAlert && io) {
+      io.emit('gas-alert', {
+        value: gasLevel,
+        threshold: alertService.getThreshold(),
+        timestamp,
+        message: `⚠️ CẢNH BÁO: Nồng độ gas vượt ngưỡng! (${gasLevel} > ${alertService.getThreshold()})`,
+      });
+    }
   } catch (error) {
-    console.error(`Failed to save gas reading to Firebase: ${error.message}`);
+    console.error('❌ Error handling gas data:', error.message);
   }
 }
+
 
 function init() {
   if (mqttClient) {

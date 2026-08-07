@@ -1,18 +1,50 @@
-# 🏭 Gas Leak Monitor - Hệ thống Giám sát & Cảnh báo Rò rỉ Khí Gas
+# 🏭 Gas Leak Monitor - Tài liệu Bàn giao Dự án
 
-Hệ thống web giám sát nồng độ khí gas real-time, điều khiển thiết bị (Buzzer/LED) từ xa, và cảnh báo khẩn cấp khi nồng độ vượt ngưỡng.
+Dự án Web Quản lý Giám sát và Cảnh báo Rò rỉ Khí Gas (Node.js + Express + MQTT + Socket.io + ESP32 Captive Portal).
 
-## 📐 Kiến trúc hệ thống
+---
 
-```
-ESP32 + MQ-2 ──MQTT──► Node.js Server ──Socket.io──► Browser (Dashboard)
-                              │                            │
-                              ▼                            ▼
-                      Firebase Realtime DB         Chart.js + Real-time UI
-                              │
-                              ▼
-                    Push Notification (giả lập)
-```
+## 📌 BÁO CÁO CÁC NHIỆM VỤ ĐÃ HOÀN THÀNH (Triết thực hiện)
+
+| Mã NV | Tên nhiệm vụ | Trạng thái | Thư mục / File tương ứng |
+|-------|--------------|------------|---------------------------|
+| **nc10** | Dựng khung Web Server Node.js + Express | ✅ Hoàn thành | `server/server.js`, `routes/api.js` |
+| **nc12** | Cấu hình WiFi Captive Portal (192.168.4.1) trên ESP32 | ✅ Hoàn thành | `esp/esp32_wifi_config/esp32_wifi_config.ino` |
+| **nc3**  | Đèn LED RGB báo trạng thái kết nối phần cứng | ✅ Hoàn thành | `esp32_wifi_config.ino` (Đỏ: AP, Xanh dương: Connect, Xanh lá: OK) |
+| **cb2**  | ĐIỀU KHIỂN CÒI BUZZER QUA MQTT (IoT Single Source of Truth) | ✅ Hoàn thành | `server/services/mqttService.js`, `routes/api.js`, `client/js/dashboard.js` |
+
+---
+
+## 📡 SƠ ĐỒ KẾT NỐI MQTT TOPICS (broker.hivemq.com:1883)
+
+| Topic | Phân loại | Hướng truyền | Payload / Message mẫu | Mô tả chức năng |
+|-------|-----------|--------------|-----------------------|-----------------|
+| `gas/sensor/data` | Sensor Data | ESP32 ➔ Server | `{"gas_level": 1250}` | ESP32 gửi nồng độ Gas ADC định kỳ mỗi 2s |
+| `gas/control/buzzer` | Control Command | Server ➔ ESP32 | `"ON"` hoặc `"OFF"` | Web/Server phát lệnh bật/tắt còi Buzzer |
+| `gas/status/buzzer` | Hardware Confirm | ESP32 ➔ Server | `"ON"` hoặc `"OFF"` | ESP32 xác nhận còi đã BẬT/TẮT thật sự để đổi UI trên Web |
+| `gas/control/reset_wifi` | System Command | Server ➔ ESP32 | `{"command": "reset_wifi"}` | Lệnh yêu cầu ESP32 xóa Flash WiFi và `ESP.restart()` |
+
+---
+
+## 📝 DANH SÁCH REST API ENDPOINTS
+
+| Method | Endpoint | Payload Body | Mô tả |
+|--------|----------|--------------|-------|
+| `POST` | `/api/control/buzzer` | `{"state": "ON"}` | Gửi lệnh Bật/Tắt còi Buzzer qua MQTT (Chức năng cb2) |
+| `GET`  | `/api/gas-history` | `?limit=20` | Truy xuất 20 mốc lịch sử dữ liệu Gas từ Firebase |
+| `POST` | `/api/control/wifi-reset` | `{"command": "reset_wifi"}` | Phát lệnh ngắt mạng và đưa ESP32 về chế độ AP 192.168.4.1 |
+
+---
+
+## 🛠️ NHIỆM VỤ TIẾP THEO DÀNH CHO HIẾU (TODO List)
+
+1. **Cấu hình Firebase Credentials (Chức năng Firebase Auth & Realtime DB):**
+   - Tải file `serviceAccountKey.json` từ Firebase Console -> Đặt vào thư mục `server/config/serviceAccountKey.json`.
+   - Cập nhật thông tin Web App Config vào `client/js/firebase-config.js`.
+   - Mở file `client/js/dashboard.js`, bỏ comment dòng check Auth `auth.onAuthStateChanged(...)` ở đầu file.
+2. **Vẽ biểu đồ Chart.js lịch sử:**
+   - Hoàn thiện việc render mảng lịch sử từ API `/api/gas-history` đắp vào Chart.js trong `dashboard.js`.
+
 
 ## 🛠️ Tech Stack
 

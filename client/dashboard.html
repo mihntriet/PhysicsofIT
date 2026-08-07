@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,8 +15,10 @@
   <link rel="stylesheet" href="css/style.css" />
 
   <!-- Favicon -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏭</text></svg>" />
+  <link rel="icon"
+    href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏭</text></svg>" />
 </head>
+
 <body>
   <div class="dashboard-page">
 
@@ -130,6 +133,52 @@
           </div>
         </div>
 
+        <!-- ── Khu vực 2.5: Cấu hình Thiết bị & WiFi (ID: nc12 - Dynamic State) ── -->
+        <div class="card wifi-card">
+          <div class="card-header">
+            <div class="card-title">
+              <span class="card-icon">📶</span>
+              Cấu hình Thiết bị & WiFi
+            </div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+            <div
+              style="display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--text-secondary);">
+              <span><strong>SSID:</strong></span>
+              <span id="wifi-ssid"
+                style="color: var(--text-muted); font-weight: 600; font-family: 'JetBrains Mono', monospace;">N/A</span>
+            </div>
+            <div
+              style="display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--text-secondary);">
+              <span><strong>IP Address:</strong></span>
+              <span id="wifi-ip" style="color: var(--text-muted); font-family: 'JetBrains Mono', monospace;">N/A</span>
+            </div>
+            <div
+              style="display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--text-secondary);">
+              <span><strong>Trạng thái:</strong></span>
+              <span id="wifi-status-badge"
+                style="display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--danger);">
+                <span id="wifi-status-dot"
+                  style="width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 8px var(--danger-glow);"></span>
+                <span id="wifi-status">CHƯA KẾT NỐI</span>
+              </span>
+            </div>
+          </div>
+
+          <button type="button" id="btn-reset-wifi" class="btn btn-danger" style="width: 100%;" disabled
+            onclick="resetWifiConfig()">
+            ⚙️ Cấu hình lại mạng
+          </button>
+
+          <div
+            style="margin-top: 10px; font-size: 0.775rem; font-style: italic; color: var(--text-muted); text-align: center;">
+            Web server cấu hình mạng: 192.168.4.1
+          </div>
+        </div>
+
+
+
         <!-- ── Khu vực 3: Biểu đồ lịch sử ── -->
         <div class="card chart-card">
           <div class="card-header">
@@ -170,4 +219,5 @@
   <script src="js/api.js"></script>
   <script src="js/dashboard.js"></script>
 </body>
+
 </html>
