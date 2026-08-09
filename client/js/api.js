@@ -1,84 +1,65 @@
-// ============================================================
-// API Client Module
-// ============================================================
-// Wrapper gọi REST API đến Back-end.
-// Tự động attach Firebase Auth token vào header.
-// ============================================================
+class ApiError extends Error {
+  constructor(message, status, payload) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.payload = payload;
+  }
+}
 
-const API_BASE = ''; // Same origin - không cần base URL
-
-/**
- * Gọi API với Firebase Auth token.
- * @param {string} endpoint - VD: '/api/control/buzzer'
- * @param {object} options - fetch options
- * @returns {Promise<object>} Response JSON
- */
 async function apiRequest(endpoint, options = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers,
-  };
-
-  // Attach Firebase Auth token nếu user đã đăng nhập
-  try {
-    const user = auth.currentUser;
-    if (user) {
-      const token = await user.getIdToken();
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-  } catch (err) {
-    console.warn('Could not get auth token:', err);
+  const user = auth.currentUser;
+  if (!user) {
+    throw new ApiError('Bạn chưa đăng nhập.', 401, null);
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const token = await user.getIdToken();
+  const response = await fetch(endpoint, {
     ...options,
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...options.headers,
+    },
   });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
 
   if (!response.ok) {
-    throw new Error(`API Error: ${response.status} ${response.statusText}`);
+    throw new ApiError(
+      payload && payload.error ? payload.error : `HTTP ${response.status}`,
+      response.status,
+      payload
+    );
   }
 
-  return response.json();
+  return payload;
 }
 
-// ── Device Control ──
+function getGasLatest() {
+  return apiRequest('/api/gas/latest');
+}
 
-/**
- * Điều khiển Buzzer (còi).
- * @param {'ON'|'OFF'} state
- */
-async function controlBuzzer(state) {
-  return apiRequest('/api/control/buzzer', {
+function getGasHistory(limit = 100) {
+  return apiRequest(`/api/gas/history?limit=${encodeURIComponent(limit)}`);
+}
+
+function getAlerts(limit = 50) {
+  return apiRequest(`/api/alerts?limit=${encodeURIComponent(limit)}`);
+}
+
+function getDeviceStatus() {
+  return apiRequest('/api/device/status');
+}
+
+function publishBuzzerCommand(command) {
+  return apiRequest('/api/buzzer', {
     method: 'POST',
-    body: JSON.stringify({ state }),
+    body: JSON.stringify({ command }),
   });
-}
-
-/**
- * Điều khiển LED (đèn).
- * @param {'ON'|'OFF'} state
- */
-async function controlLed(state) {
-  return apiRequest('/api/control/led', {
-    method: 'POST',
-    body: JSON.stringify({ state }),
-  });
-}
-
-// ── Sensor Data ──
-
-/**
- * Lấy giá trị cảm biến hiện tại.
- */
-async function getSensorCurrent() {
-  return apiRequest('/api/sensor/current');
-}
-
-/**
- * Lấy lịch sử dữ liệu cảm biến.
- * @param {number} limit - Số records (mặc định 50)
- */
-async function getSensorHistory(limit = 50) {
-  return apiRequest(`/api/sensor/history?limit=${limit}`);
 }

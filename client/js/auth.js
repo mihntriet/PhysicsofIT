@@ -1,235 +1,175 @@
-// ============================================================
-// Authentication Module
-// ============================================================
-// Xử lý đăng nhập, đăng ký, quên mật khẩu với Firebase Auth.
-// Chuyển hướng đến dashboard.html sau khi đăng nhập thành công.
-// ============================================================
-
 document.addEventListener('DOMContentLoaded', () => {
-  // ── DOM Elements ──
   const loginForm = document.getElementById('login-form');
   const registerForm = document.getElementById('register-form');
   const resetForm = document.getElementById('reset-form');
-
-  const showRegisterLink = document.getElementById('show-register');
-  const showLoginLink = document.getElementById('show-login');
-  const showResetLink = document.getElementById('show-reset');
-  const showLoginFromReset = document.getElementById('show-login-from-reset');
-
   const loginMessage = document.getElementById('login-message');
   const registerMessage = document.getElementById('register-message');
   const resetMessage = document.getElementById('reset-message');
+  let registering = false;
 
-  const loginBtn = document.getElementById('login-btn');
-  const registerBtn = document.getElementById('register-btn');
-  const resetBtn = document.getElementById('reset-btn');
-
-  // ── Kiểm tra trạng thái đăng nhập ──
-  auth.onAuthStateChanged((user) => {
-    if (user) {
-      // Đã đăng nhập → chuyển đến Dashboard
-      window.location.href = '/dashboard';
+  function showSection(name) {
+    for (const sectionName of ['login', 'register', 'reset']) {
+      const section = document.getElementById(`${sectionName}-section`);
+      if (section) section.classList.toggle('hidden', sectionName !== name);
     }
-  });
-
-  // ── Chuyển đổi giữa các form ──
-  if (showRegisterLink) {
-    showRegisterLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      toggleForms('register');
-    });
+    for (const message of [loginMessage, registerMessage, resetMessage]) {
+      if (message) message.className = 'form-message';
+    }
   }
 
-  if (showLoginLink) {
-    showLoginLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      toggleForms('login');
-    });
-  }
-
-  if (showResetLink) {
-    showResetLink.addEventListener('click', (e) => {
-      e.preventDefault();
-      toggleForms('reset');
-    });
-  }
-
-  if (showLoginFromReset) {
-    showLoginFromReset.addEventListener('click', (e) => {
-      e.preventDefault();
-      toggleForms('login');
-    });
-  }
-
-  /**
-   * Hiện/ẩn các form Login, Register, Reset.
-   * @param {'login'|'register'|'reset'} formName
-   */
-  function toggleForms(formName) {
-    const forms = {
-      login: document.getElementById('login-section'),
-      register: document.getElementById('register-section'),
-      reset: document.getElementById('reset-section'),
-    };
-
-    Object.keys(forms).forEach((key) => {
-      if (forms[key]) {
-        forms[key].classList.toggle('hidden', key !== formName);
-      }
-    });
-
-    // Clear messages
-    clearMessages();
-  }
-
-  function clearMessages() {
-    [loginMessage, registerMessage, resetMessage].forEach((el) => {
-      if (el) {
-        el.textContent = '';
-        el.className = 'form-message';
-      }
-    });
-  }
-
-  /**
-   * Hiển thị thông báo trên form.
-   */
   function showMessage(element, text, type = 'error') {
     if (!element) return;
     element.textContent = text;
     element.className = `form-message ${type}`;
   }
 
-  /**
-   * Set trạng thái loading cho button.
-   */
-  function setLoading(button, isLoading, originalText) {
+  function setLoading(button, loading, originalText) {
     if (!button) return;
-    if (isLoading) {
-      button.disabled = true;
+    button.disabled = loading;
+    if (loading) {
       button.innerHTML = '<span class="spinner"></span> Đang xử lý...';
     } else {
-      button.disabled = false;
       button.textContent = originalText;
     }
   }
 
-  // ══════════════════════════════════════════
-  // ĐĂNG NHẬP
-  // ══════════════════════════════════════════
-  if (loginForm) {
-    loginForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      clearMessages();
-
-      const email = document.getElementById('login-email').value.trim();
-      const password = document.getElementById('login-password').value;
-
-      if (!email || !password) {
-        showMessage(loginMessage, 'Vui lòng nhập đầy đủ email và mật khẩu.');
-        return;
-      }
-
-      setLoading(loginBtn, true, 'Đăng nhập');
-
-      try {
-        await auth.signInWithEmailAndPassword(email, password);
-        showMessage(loginMessage, 'Đăng nhập thành công! Đang chuyển hướng...', 'success');
-        // onAuthStateChanged sẽ tự redirect
-      } catch (error) {
-        const errorMessages = {
-          'auth/user-not-found': 'Tài khoản không tồn tại.',
-          'auth/wrong-password': 'Mật khẩu không đúng.',
-          'auth/invalid-email': 'Email không hợp lệ.',
-          'auth/too-many-requests': 'Quá nhiều lần thử. Vui lòng thử lại sau.',
-          'auth/invalid-credential': 'Email hoặc mật khẩu không đúng.',
-        };
-        showMessage(loginMessage, errorMessages[error.code] || `Lỗi: ${error.message}`);
-      } finally {
-        setLoading(loginBtn, false, 'Đăng nhập');
-      }
-    });
+  async function readProfile(uid) {
+    const snapshot = await firestore.collection('users').doc(uid).get();
+    return snapshot.exists ? snapshot.data() : null;
   }
 
-  // ══════════════════════════════════════════
-  // ĐĂNG KÝ
-  // ══════════════════════════════════════════
-  if (registerForm) {
-    registerForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      clearMessages();
-
-      const email = document.getElementById('register-email').value.trim();
-      const password = document.getElementById('register-password').value;
-      const confirmPassword = document.getElementById('register-confirm').value;
-
-      if (!email || !password || !confirmPassword) {
-        showMessage(registerMessage, 'Vui lòng điền đầy đủ thông tin.');
-        return;
-      }
-
-      if (password.length < 6) {
-        showMessage(registerMessage, 'Mật khẩu phải có ít nhất 6 ký tự.');
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        showMessage(registerMessage, 'Mật khẩu xác nhận không khớp.');
-        return;
-      }
-
-      setLoading(registerBtn, true, 'Đăng ký');
-
-      try {
-        await auth.createUserWithEmailAndPassword(email, password);
-        showMessage(registerMessage, 'Đăng ký thành công! Đang chuyển hướng...', 'success');
-        // onAuthStateChanged sẽ tự redirect
-      } catch (error) {
-        const errorMessages = {
-          'auth/email-already-in-use': 'Email này đã được sử dụng.',
-          'auth/invalid-email': 'Email không hợp lệ.',
-          'auth/weak-password': 'Mật khẩu quá yếu. Cần ít nhất 6 ký tự.',
-        };
-        showMessage(registerMessage, errorMessages[error.code] || `Lỗi: ${error.message}`);
-      } finally {
-        setLoading(registerBtn, false, 'Đăng ký');
-      }
-    });
+  async function routeAuthenticatedUser(user) {
+    const profile = await readProfile(user.uid);
+    if (!profile) {
+      showMessage(loginMessage, 'Tài khoản chưa có hồ sơ Firestore. Vui lòng liên hệ quản trị viên.');
+      await auth.signOut();
+      return;
+    }
+    if (profile.status === 'active') {
+      window.location.href = '/dashboard';
+      return;
+    }
+    showMessage(loginMessage, 'Tài khoản đã đăng ký và đang chờ được cấp quyền.', 'success');
+    await auth.signOut();
   }
 
-  // ══════════════════════════════════════════
-  // QUÊN MẬT KHẨU
-  // ══════════════════════════════════════════
-  if (resetForm) {
-    resetForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      clearMessages();
+  document.getElementById('show-register')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    showSection('register');
+  });
+  document.getElementById('show-login')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    showSection('login');
+  });
+  document.getElementById('show-reset')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    showSection('reset');
+  });
+  document.getElementById('show-login-from-reset')?.addEventListener('click', (event) => {
+    event.preventDefault();
+    showSection('login');
+  });
 
-      const email = document.getElementById('reset-email').value.trim();
+  auth.onAuthStateChanged((user) => {
+    if (user && !registering) {
+      routeAuthenticatedUser(user).catch((error) => {
+        showMessage(loginMessage, `Không thể kiểm tra hồ sơ: ${error.message}`);
+      });
+    }
+  });
 
-      if (!email) {
-        showMessage(resetMessage, 'Vui lòng nhập email.');
-        return;
+  loginForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = document.getElementById('login-btn');
+    const email = document.getElementById('login-email').value.trim();
+    const password = document.getElementById('login-password').value;
+    setLoading(button, true, 'Đăng nhập');
+
+    try {
+      await auth.signInWithEmailAndPassword(email, password);
+    } catch (error) {
+      const messages = {
+        'auth/invalid-email': 'Email không hợp lệ.',
+        'auth/invalid-credential': 'Email hoặc mật khẩu không đúng.',
+        'auth/too-many-requests': 'Quá nhiều lần thử. Vui lòng thử lại sau.',
+      };
+      showMessage(loginMessage, messages[error.code] || error.message);
+    } finally {
+      setLoading(button, false, 'Đăng nhập');
+    }
+  });
+
+  registerForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = document.getElementById('register-btn');
+    const fullName = document.getElementById('register-full-name').value.trim();
+    const email = document.getElementById('register-email').value.trim();
+    const password = document.getElementById('register-password').value;
+    const confirmPassword = document.getElementById('register-confirm').value;
+
+    if (!fullName) {
+      showMessage(registerMessage, 'Vui lòng nhập họ và tên.');
+      return;
+    }
+    if (password.length < 6) {
+      showMessage(registerMessage, 'Mật khẩu phải có ít nhất 6 ký tự.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      showMessage(registerMessage, 'Mật khẩu xác nhận không khớp.');
+      return;
+    }
+
+    setLoading(button, true, 'Đăng ký');
+    registering = true;
+    let createdUser = null;
+    try {
+      const credential = await auth.createUserWithEmailAndPassword(email, password);
+      createdUser = credential.user;
+      await firestore.collection('users').doc(credential.user.uid).set({
+        uid: credential.user.uid,
+        fullName,
+        email,
+        role: 'user',
+        status: 'pending',
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      await auth.signOut();
+      showMessage(
+        registerMessage,
+        'Tài khoản đã đăng ký và đang chờ được cấp quyền.',
+        'success'
+      );
+      registerForm.reset();
+    } catch (error) {
+      if (createdUser) {
+        await createdUser.delete().catch(() => auth.signOut());
       }
+      const messages = {
+        'auth/email-already-in-use': 'Email này đã được sử dụng.',
+        'auth/invalid-email': 'Email không hợp lệ.',
+        'auth/weak-password': 'Mật khẩu chưa đủ mạnh.',
+      };
+      showMessage(registerMessage, messages[error.code] || error.message);
+    } finally {
+      registering = false;
+      setLoading(button, false, 'Đăng ký');
+    }
+  });
 
-      setLoading(resetBtn, true, 'Gửi email khôi phục');
+  resetForm?.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const button = document.getElementById('reset-btn');
+    const email = document.getElementById('reset-email').value.trim();
+    setLoading(button, true, 'Gửi email khôi phục');
 
-      try {
-        await auth.sendPasswordResetEmail(email);
-        showMessage(
-          resetMessage,
-          'Đã gửi email khôi phục mật khẩu! Kiểm tra hộp thư của bạn.',
-          'success'
-        );
-      } catch (error) {
-        const errorMessages = {
-          'auth/user-not-found': 'Email không tồn tại trong hệ thống.',
-          'auth/invalid-email': 'Email không hợp lệ.',
-        };
-        showMessage(resetMessage, errorMessages[error.code] || `Lỗi: ${error.message}`);
-      } finally {
-        setLoading(resetBtn, false, 'Gửi email khôi phục');
-      }
-    });
-  }
+    try {
+      await auth.sendPasswordResetEmail(email);
+      showMessage(resetMessage, 'Đã gửi email khôi phục mật khẩu.', 'success');
+    } catch (error) {
+      showMessage(resetMessage, error.code === 'auth/invalid-email' ? 'Email không hợp lệ.' : error.message);
+    } finally {
+      setLoading(button, false, 'Gửi email khôi phục');
+    }
+  });
 });

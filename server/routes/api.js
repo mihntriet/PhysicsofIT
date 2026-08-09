@@ -1,112 +1,150 @@
-// ============================================================
-// API Routes
-// ============================================================
-// REST API endpoints cho Front-end gọi:
-// - Điều khiển thiết bị (Buzzer, LED)
-// - Lấy dữ liệu cảm biến (hiện tại, lịch sử)
-// ============================================================
-
 const express = require('express');
-const router = express.Router();
-const mqttService = require('../services/mqttService');
+const {
+  getFirebaseAuth,
+  getFirestore,
+  isFirebaseInitialized,
+} = require('../config/firebase');
 const firebaseService = require('../services/firebaseService');
-const alertService = require('../services/alertService');
+const mqttService = require('../services/mqttService');
 
-// ─────────────────────────────────────────────
-// POST /api/control/buzzer (Chức năng cb2)
-// Body: { "state": "ON" } hoặc { "state": "OFF" }
-// ─────────────────────────────────────────────
-router.post('/control/buzzer', (req, res) => {
-  const { state } = req.body;
+const router = express.Router();
 
-  if (!state || !['ON', 'OFF'].includes(state.toUpperCase())) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid state. Use "ON" or "OFF".',
-    });
+function parseLimit(value, defaultValue, maxValue) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed)) {
+    return defaultValue;
+  }
+  return Math.min(Math.max(parsed, 1), maxValue);
+}
+
+async function requireActiveUser(req, res, next) {
+  const authorization = req.get('Authorization') || '';
+  const match = authorization.match(/^Bearer\s+(.+)$/i);
+
+  if (!match) {
+    return res.status(401).json({ success: false, error: 'Firebase ID token is required.' });
   }
 
-  const normalizedState = state.toUpperCase();
-  const result = mqttService.controlDevice('buzzer', normalizedState);
+  try {
+    const decodedToken = await getFirebaseAuth().verifyIdToken(match[1]);
+    const profileSnapshot = await getFirestore()
+      .collection('users')
+      .doc(decodedToken.uid)
+      .get();
 
-  res.json({
-    success: result,
-    device: 'buzzer',
-    state: normalizedState,
-    message: result
-      ? `Đã gửi lệnh ${normalizedState} tới Còi Buzzer`
-      : 'Không thể gửi lệnh. MQTT chưa kết nối.',
-  });
-});
+    if (!profileSnapshot.exists) {
+      return res.status(403).json({ success: false, error: 'User profile does not exist.' });
+    }
 
+    const profile = profileSnapshot.data();
+    if (profile.status !== 'active') {
+      return res.status(403).json({
+        success: false,
+        error: 'Account is waiting for approval.',
+        status: profile.status || 'pending',
+      });
+    }
 
-// ─────────────────────────────────────────────
-// POST /api/control/led
-// Body: { "state": "ON" } hoặc { "state": "OFF" }
-// ─────────────────────────────────────────────
-router.post('/control/led', (req, res) => {
-  const { state } = req.body;
-
-  if (!state || !['ON', 'OFF'].includes(state.toUpperCase())) {
-    return res.status(400).json({
-      success: false,
-      error: 'Invalid state. Use "ON" or "OFF".',
-    });
+    req.user = { uid: decodedToken.uid, email: decodedToken.email, profile };
+    return next();
+  } catch (error) {
+    if (error.code && error.code.startsWith('auth/')) {
+      return res.status(401).json({ success: false, error: 'Invalid or expired Firebase ID token.' });
+    }
+    console.error(`Authentication middleware error: ${error.message}`);
+    return res.status(503).json({ success: false, error: 'Authentication service unavailable.' });
   }
+}
 
-  const result = mqttService.controlDevice('led', state);
-
-  res.json({
-    success: result,
-    device: 'led',
-    state: state.toUpperCase(),
-    message: result
-      ? `LED turned ${state.toUpperCase()}`
-      : 'Failed to send command. MQTT not connected.',
-  });
-});
-
-// ─────────────────────────────────────────────
-// GET /api/sensor/current
-// Trả về giá trị gas mới nhất + trạng thái thiết bị
-// ─────────────────────────────────────────────
-router.get('/sensor/current', (req, res) => {
+router.get('/health', (req, res) => {
+  const mqttStatus = mqttService.getMQTTStatus();
   res.json({
     success: true,
     data: {
-      gasValue: mqttService.getLatestGasValue(),
-      threshold: alertService.getThreshold(),
-      devices: mqttService.getDeviceStates(),
+      server: 'UP',
+      firebase: isFirebaseInitialized() ? 'READY' : 'NOT_READY',
+      mqtt: { brokerConnected: mqttStatus.brokerConnected },
       timestamp: Date.now(),
     },
   });
 });
 
-// ─────────────────────────────────────────────
-// GET /api/gas-history?limit=20
-// Lấy 20 mốc dữ liệu gas gần nhất từ Firebase
-// ─────────────────────────────────────────────
-router.get('/gas-history', async (req, res) => {
+router.use(requireActiveUser);
+
+router.get('/gas/latest', async (req, res) => {
   try {
-    const limit = parseInt(req.query.limit, 10) || 20;
-    const clampedLimit = Math.min(Math.max(limit, 1), 100);
-
-    const history = await firebaseService.getHistory(clampedLimit);
-
-    res.json({
-      success: true,
-      count: history.length,
-      threshold: alertService.getThreshold(),
-      data: history,
-    });
+    const latest = await firebaseService.getLatest();
+    if (!latest) {
+      return res.status(404).json({ success: false, error: 'No gas data is available yet.' });
+    }
+    return res.json({ success: true, data: latest });
   } catch (error) {
-    console.error('❌ Error in /api/gas-history:', error.message);
-    res.status(500).json({
-      success: false,
-      error: 'Failed to fetch gas history.',
-    });
+    console.error(`GET /api/gas/latest failed: ${error.message}`);
+    return res.status(503).json({ success: false, error: 'Realtime Database unavailable.' });
   }
 });
 
+router.get('/gas/history', async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 100, 500);
+    const history = await firebaseService.getHistory(limit);
+    return res.json({ success: true, count: history.length, data: history });
+  } catch (error) {
+    console.error(`GET /api/gas/history failed: ${error.message}`);
+    return res.status(503).json({ success: false, error: 'Realtime Database unavailable.' });
+  }
+});
+
+router.get('/alerts', async (req, res) => {
+  try {
+    const limit = parseLimit(req.query.limit, 50, 500);
+    const alerts = await firebaseService.getAlerts(limit);
+    return res.json({ success: true, count: alerts.length, data: alerts });
+  } catch (error) {
+    console.error(`GET /api/alerts failed: ${error.message}`);
+    return res.status(503).json({ success: false, error: 'Realtime Database unavailable.' });
+  }
+});
+
+router.get('/device/status', async (req, res) => {
+  try {
+    const persisted = await firebaseService.getDeviceStatus();
+    return res.json({
+      success: true,
+      data: {
+        deviceId: process.env.DEVICE_ID || 'ESP32-GAS-MONITOR',
+        ...persisted,
+        mqtt: mqttService.getMQTTStatus(),
+      },
+    });
+  } catch (error) {
+    console.error(`GET /api/device/status failed: ${error.message}`);
+    return res.status(503).json({ success: false, error: 'Device status unavailable.' });
+  }
+});
+
+router.post('/buzzer', async (req, res) => {
+  const command = typeof req.body.command === 'string'
+    ? req.body.command.trim().toUpperCase()
+    : '';
+
+  if (!['ON', 'OFF'].includes(command)) {
+    return res.status(400).json({ success: false, error: 'command must be ON or OFF.' });
+  }
+
+  try {
+    const published = await mqttService.publishBuzzerCommand(command);
+    return res.status(202).json({
+      success: true,
+      data: {
+        command: published.command,
+        published: true,
+        actualState: mqttService.getMQTTStatus().buzzerState,
+      },
+    });
+  } catch (error) {
+    return res.status(503).json({ success: false, error: error.message });
+  }
+});
 
 module.exports = router;

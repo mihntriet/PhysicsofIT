@@ -1,25 +1,23 @@
 # Dependencies
 node_modules/
+server/node_modules/
 
-# Environment variables
+# Environment and credentials
 .env
+server/.env
+serviceAccountKey.json
+server/config/serviceAccountKey.json
+mosquitto/password_file
+mosquitto/passwd
+mosquitto/*.password
 
-# IDE
+# Logs and runtime files
+*.log
+mosquitto/data/
+mosquitto/log/
+
+# IDE and operating system
 .vscode/
 .idea/
-
-# OS files
 .DS_Store
 Thumbs.db
-
-# Logs
-*.log
-
-server/config/firebase-config.js
-
-node_modules/
-serviceAccountKey.json
-
-server/node_modules/
-server/.env
-server/config/serviceAccountKey.json
