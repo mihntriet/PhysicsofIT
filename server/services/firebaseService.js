@@ -1,68 +1,157 @@
-// ============================================================
-// Firebase Database Service
-// ============================================================
-// Đọc/ghi dữ liệu cảm biến gas vào Firebase Realtime Database.
-// Path: /gas_history/{pushId}
-// ============================================================
+const { getRealtimeDatabase } = require('../config/firebase');
 
-const { admin } = require('../config/firebase');
+const DEVICE_ID = process.env.DEVICE_ID || 'ESP32-GAS-MONITOR';
+const HISTORY_SAVE_INTERVAL_MS = Math.max(
+  Number.parseInt(process.env.HISTORY_SAVE_INTERVAL_MS, 10) || 30000,
+  5000
+);
 
-/**
- * Lưu một data point gas vào node `gas_history` trong Firebase.
- * @param {{ gas_level: number, timestamp: number }} dataPoint
- */
-async function saveGasData(dataPoint) {
-  try {
-    const db = admin.database();
-    const ref = db.ref('gas_history');
+let lastHistorySavedAt = 0;
+let lastHistoryAlert = null;
 
-    await ref.push({
-      gas_level: dataPoint.gas_level,
-      timestamp: dataPoint.timestamp || Date.now(),
-      datetime: new Date(dataPoint.timestamp || Date.now()).toISOString(),
-    });
-  } catch (error) {
-    if (error.code === 'app/no-app') return;
-    console.error('❌ Error saving gas data to Firebase:', error.message);
-  }
+function devicePath(suffix = '') {
+  const base = `devices/${DEVICE_ID}`;
+  return suffix ? `${base}/${suffix}` : base;
 }
 
-/**
- * Lấy lịch sử dữ liệu gas gần nhất từ node `gas_history`.
- * @param {number} limit - Số lượng records cần lấy (mặc định 20)
- * @returns {Array<{gas_level: number, timestamp: number, datetime: string}>}
- */
-async function getHistory(limit = 20) {
-  try {
-    const db = admin.database();
-    const ref = db.ref('gas_history');
+async function saveGasData(data) {
+  const db = getRealtimeDatabase();
+  const timestamp = Date.now();
+  const latest = {
+    deviceId: data.deviceId,
+    gasRaw: data.gasRaw,
+    alert: data.alert,
+    ready: data.ready,
+    timestamp,
+  };
 
-    const snapshot = await ref
-      .orderByChild('timestamp')
-      .limitToLast(limit)
-      .once('value');
+  const updates = {
+    [devicePath('latest')]: latest,
+    [devicePath('status/gasRaw')]: data.gasRaw,
+    [devicePath('status/updatedAt')]: timestamp,
+  };
 
-    const data = [];
-    snapshot.forEach((child) => {
-      const val = child.val();
-      data.push({
-        id: child.key,
-        gas_level: val.gas_level !== undefined ? val.gas_level : val.value,
-        timestamp: val.timestamp,
-        datetime: val.datetime,
-      });
-    });
+  if (data.ready) {
+    const alertChanged = lastHistoryAlert !== null && data.alert !== lastHistoryAlert;
+    const intervalElapsed = timestamp - lastHistorySavedAt >= HISTORY_SAVE_INTERVAL_MS;
 
-    data.sort((a, b) => a.timestamp - b.timestamp);
-    return data;
-  } catch (error) {
-    if (error.code === 'app/no-app') return [];
-    console.error('❌ Error fetching gas history from Firebase:', error.message);
-    return [];
+    if (alertChanged || intervalElapsed) {
+      const readingKey = db.ref(devicePath('readings')).push().key;
+      updates[devicePath(`readings/${readingKey}`)] = {
+        deviceId: data.deviceId,
+        gasRaw: data.gasRaw,
+        alert: data.alert,
+        timestamp,
+      };
+      lastHistorySavedAt = timestamp;
+    }
+
+    lastHistoryAlert = data.alert;
   }
+
+  await db.ref().update(updates);
+  return latest;
+}
+
+async function saveGasAlert(data) {
+  const db = getRealtimeDatabase();
+  const statusRef = db.ref(devicePath('status/gasState'));
+  const previousSnapshot = await statusRef.once('value');
+  const previousState = previousSnapshot.val() || 'UNKNOWN';
+  const timestamp = Date.now();
+  const changed = previousState !== data.state;
+
+  const updates = {
+    [devicePath('status/gasState')]: data.state,
+    [devicePath('status/gasRaw')]: data.gasRaw,
+    [devicePath('status/updatedAt')]: timestamp,
+  };
+
+  if (changed) {
+    const alertKey = db.ref(devicePath('alerts')).push().key;
+    updates[devicePath(`alerts/${alertKey}`)] = {
+      deviceId: data.deviceId,
+      gasRaw: data.gasRaw,
+      state: data.state,
+      previousState,
+      timestamp,
+    };
+  }
+
+  await db.ref().update(updates);
+  return { changed, previousState, state: data.state, timestamp };
+}
+
+async function saveBuzzerStatus(data) {
+  const db = getRealtimeDatabase();
+  const timestamp = Date.now();
+
+  await db.ref(devicePath('status')).update({
+    buzzerState: data.state,
+    buzzerReason: data.reason,
+    updatedAt: timestamp,
+  });
+}
+
+async function saveAvailability(availability) {
+  const db = getRealtimeDatabase();
+  await db.ref(devicePath('status')).update({
+    availability,
+    updatedAt: Date.now(),
+  });
+}
+
+async function getLatest() {
+  const snapshot = await getRealtimeDatabase()
+    .ref(devicePath('latest'))
+    .once('value');
+  return snapshot.exists() ? snapshot.val() : null;
+}
+
+async function getHistory(limit) {
+  const snapshot = await getRealtimeDatabase()
+    .ref(devicePath('readings'))
+    .orderByChild('timestamp')
+    .limitToLast(limit)
+    .once('value');
+
+  const readings = [];
+  snapshot.forEach((child) => {
+    readings.push({ id: child.key, ...child.val() });
+  });
+
+  return readings.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+async function getAlerts(limit) {
+  const snapshot = await getRealtimeDatabase()
+    .ref(devicePath('alerts'))
+    .orderByChild('timestamp')
+    .limitToLast(limit)
+    .once('value');
+
+  const alerts = [];
+  snapshot.forEach((child) => {
+    alerts.push({ id: child.key, ...child.val() });
+  });
+
+  return alerts.sort((a, b) => a.timestamp - b.timestamp);
+}
+
+async function getDeviceStatus() {
+  const snapshot = await getRealtimeDatabase()
+    .ref(devicePath('status'))
+    .once('value');
+  return snapshot.exists() ? snapshot.val() : null;
 }
 
 module.exports = {
   saveGasData,
+  saveGasAlert,
+  saveBuzzerStatus,
+  saveAvailability,
+  getLatest,
   getHistory,
+  getAlerts,
+  getDeviceStatus,
 };

@@ -1,102 +1,84 @@
-// ============================================================
-//  Gas Leak Monitor - Main Server
-// ============================================================
-//  Entry point: Express + Socket.io + MQTT
-//  Serve static frontend từ ../client/
-// ============================================================
-
-require('dotenv').config();
+require('dotenv').config({ path: `${__dirname}/.env` });
 
 const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-const cors = require('cors');
 const path = require('path');
-
-// ── Config & Services ──
-const { initializeFirebase } = require('./config/firebase');
+const { deleteFirebaseApp, initializeFirebase } = require('./config/firebase');
 const mqttService = require('./services/mqttService');
+const firebaseService = require('./services/firebaseService');
+const alertService = require('./services/alertService');
 const apiRoutes = require('./routes/api');
 
-// ── Khởi tạo Express & HTTP Server ──
 const app = express();
-const server = http.createServer(app);
-
-// ── Khởi tạo Socket.io ──
-const io = new Server(server, {
-  cors: {
-    origin: '*',
-    methods: ['GET', 'POST'],
-  },
-});
-
-// ── Middleware ──
-app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// ── Serve Static Frontend ──
 const clientPath = path.join(__dirname, '..', 'client');
+let httpServer = null;
+let shuttingDown = false;
+
+app.use(express.json({ limit: '32kb' }));
+app.use(express.urlencoded({ extended: false }));
 app.use(express.static(clientPath));
-
-// ── API Routes ──
 app.use('/api', apiRoutes);
-
-// ── Fallback: Serve index.html cho mọi route ──
-app.get('/', (req, res) => {
-  res.sendFile(path.join(clientPath, 'index.html'));
-});
 
 app.get('/dashboard', (req, res) => {
   res.sendFile(path.join(clientPath, 'dashboard.html'));
 });
 
-// ── Socket.io Connection Handler ──
-io.on('connection', (socket) => {
-  console.log(`🟢 Client connected: ${socket.id}`);
-
-  // Gửi dữ liệu hiện tại ngay khi client kết nối
-  socket.emit('gas-data', {
-    value: mqttService.getLatestGasValue ? mqttService.getLatestGasValue() : 0,
-    timestamp: Date.now(),
-  });
-
-  if (mqttService.getDeviceStates) {
-    socket.emit('device-state-all', mqttService.getDeviceStates());
-  }
-
-  socket.on('disconnect', () => {
-    console.log(`🔴 Client disconnected: ${socket.id}`);
-  });
-});
-
-// ── Khởi động Server ──
-const PORT = process.env.PORT || 3000;
-
 async function startServer() {
-  // 1) Khởi tạo Firebase (không block nếu lỗi)
-  try {
-    initializeFirebase();
-  } catch (err) {
-    console.warn('⚠️ Firebase init skipped or failed:', err.message);
-  }
+  initializeFirebase();
 
-  // 2) Khởi tạo MQTT Service (truyền Socket.io instance nếu hỗ trợ)
-  if (mqttService.init) {
-    mqttService.init(io);
-  }
-
-  // 3) Start HTTP Server
-  server.listen(PORT, () => {
-    console.log('');
-    console.log('══════════════════════════════════════════════════');
-    console.log('  🏭  Gas Leak Monitor Server');
-    console.log(`  🌐  http://localhost:${PORT}`);
-    console.log(`  📊  Dashboard: http://localhost:${PORT}/dashboard`);
-    console.log('══════════════════════════════════════════════════');
-    console.log('');
+  mqttService.startMQTT({
+    onGasData: (data) => firebaseService.saveGasData(data),
+    onGasAlert: async (data) => {
+      const transition = await firebaseService.saveGasAlert(data);
+      void alertService.handleGasTransition(data, transition);
+    },
+    onBuzzerStatus: (data) => firebaseService.saveBuzzerStatus(data),
+    onAvailability: (availability) => firebaseService.saveAvailability(availability),
   });
+
+  const host = process.env.HOST || '0.0.0.0';
+  const port = Number.parseInt(process.env.PORT, 10) || 3000;
+
+  await new Promise((resolve, reject) => {
+    httpServer = app.listen(port, host, resolve);
+    httpServer.once('error', reject);
+  });
+
+  console.log(`Gas Monitor server listening on http://${host}:${port}.`);
+  return httpServer;
 }
 
-startServer();
+async function gracefulShutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+  console.log(`${signal}: shutting down...`);
 
+  await mqttService.stopMQTT();
+
+  if (httpServer) {
+    await new Promise((resolve) => httpServer.close(resolve));
+  }
+
+  await deleteFirebaseApp();
+}
+
+if (require.main === module) {
+  startServer().catch((error) => {
+    console.error(`Server startup failed: ${error.message}`);
+    process.exitCode = 1;
+  });
+
+  for (const signal of ['SIGINT', 'SIGTERM']) {
+    process.on(signal, () => {
+      gracefulShutdown(signal)
+        .then(() => process.exit(0))
+        .catch((error) => {
+          console.error(`Shutdown failed: ${error.message}`);
+          process.exit(1);
+        });
+    });
+  }
+}
+
+module.exports = { app, startServer, gracefulShutdown };

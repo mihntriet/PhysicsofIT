@@ -1,88 +1,64 @@
-// ============================================================
-// Alert Service
-// ============================================================
-// Kiểm tra ngưỡng gas và phát cảnh báo khẩn cấp.
-// Giả lập Push Notification (có thể mở rộng FCM sau).
-// ============================================================
+const Pushsafer = require('pushsafer-notifications');
 
-const GAS_THRESHOLD = parseInt(process.env.GAS_THRESHOLD, 10) || 2000;
+function sendPushsaferAlert(gasRaw) {
+  const privateKey = process.env.PUSHSAFER_PRIVATE_KEY;
+  const deviceId = process.env.PUSHSAFER_DEVICE_ID;
 
-// Cooldown: Không spam cảnh báo liên tục (tối thiểu 30 giây giữa 2 lần)
-const ALERT_COOLDOWN_MS = 30000;
-let lastAlertTime = 0;
-
-/**
- * Kiểm tra giá trị gas có vượt ngưỡng không.
- * Nếu vượt ngưỡng VÀ hết cooldown → phát cảnh báo.
- * @param {number} gasValue - Giá trị ADC từ cảm biến
- * @returns {boolean} true nếu cần cảnh báo
- */
-function checkThreshold(gasValue) {
-  if (gasValue < GAS_THRESHOLD) {
-    return false;
+  if (!privateKey || !deviceId) {
+    console.warn('Pushsafer is not configured; alert was recorded without a phone notification.');
+    return Promise.resolve({ sent: false, reason: 'not-configured' });
   }
 
-  const now = Date.now();
-  if (now - lastAlertTime < ALERT_COOLDOWN_MS) {
-    // Vẫn trong cooldown - không cảnh báo lại
-    return false;
-  }
-
-  lastAlertTime = now;
-
-  // ── Phát cảnh báo ──
-  console.log('');
-  console.log('🚨 ═══════════════════════════════════════════════');
-  console.log(`🚨  CẢNH BÁO KHẨN CẤP: RÒ RỈ KHÍ GAS!`);
-  console.log(`🚨  Giá trị hiện tại: ${gasValue} (Ngưỡng: ${GAS_THRESHOLD})`);
-  console.log(`🚨  Thời gian: ${new Date().toLocaleString('vi-VN')}`);
-  console.log('🚨 ═══════════════════════════════════════════════');
-  console.log('');
-
-  // Giả lập Push Notification
-  simulatePushNotification(gasValue);
-
-  return true;
-}
-
-/**
- * Giả lập gửi Push Notification.
- * Trong thực tế, thay bằng Firebase Cloud Messaging (FCM),
- * Telegram Bot API, hoặc dịch vụ SMS.
- * @param {number} gasValue
- */
-function simulatePushNotification(gasValue) {
-  const notification = {
-    title: '🚨 Cảnh báo rò rỉ khí Gas!',
-    body: `Nồng độ gas: ${gasValue} (vượt ngưỡng ${GAS_THRESHOLD}). Kiểm tra ngay!`,
-    timestamp: new Date().toISOString(),
-    priority: 'HIGH',
+  let pushsaferApiError = null;
+  const client = new Pushsafer({
+    k: privateKey,
+    debug: false,
+    onerror: (message) => {
+      pushsaferApiError = new Error(message);
+    },
+  });
+  const message = {
+    t: 'Cảnh báo rò rỉ khí gas',
+    m: `ESP32 phát hiện mức gas ${gasRaw} ADC. Hãy kiểm tra ngay.`,
+    d: deviceId,
+    s: '8',
+    v: '2',
+    i: '5',
+    c: '#ff4444',
+    pr: '1',
   };
 
-  console.log('📲 [PUSH NOTIFICATION] Gửi thông báo:');
-  console.log(`   Title: ${notification.title}`);
-  console.log(`   Body:  ${notification.body}`);
-  console.log('   → Đây là giả lập. Tích hợp FCM/Telegram để gửi thật.');
-  console.log('');
+  return new Promise((resolve, reject) => {
+    client.send(message, (error, result) => {
+      if (error || pushsaferApiError) {
+        reject(error || pushsaferApiError);
+        return;
+      }
 
-  // TODO: Tích hợp thực tế
-  // ─ Firebase Cloud Messaging:
-  //   admin.messaging().send({ notification, topic: 'gas-alerts' });
-  //
-  // ─ Telegram Bot:
-  //   axios.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-  //     chat_id: CHAT_ID, text: notification.body
-  //   });
+      resolve({ sent: true, result });
+    });
+  });
 }
 
-/**
- * Lấy giá trị ngưỡng hiện tại.
- */
-function getThreshold() {
-  return GAS_THRESHOLD;
+async function handleGasTransition(data, transition) {
+  if (!transition.changed
+      || transition.previousState !== 'SAFE'
+      || data.state !== 'ALERT') {
+    return { sent: false, reason: 'not-safe-to-alert-transition' };
+  }
+
+  try {
+    const result = await sendPushsaferAlert(data.gasRaw);
+    if (result.sent) {
+      console.log('Pushsafer alert sent for SAFE -> ALERT transition.');
+    }
+    return result;
+  } catch (error) {
+    console.error(`Pushsafer error: ${error.message}`);
+    return { sent: false, reason: 'send-failed' };
+  }
 }
 
 module.exports = {
-  checkThreshold,
-  getThreshold,
+  handleGasTransition,
 };

@@ -708,6 +708,37 @@ body::before {
   height: 100% !important;
 }
 
+#gas-chart {
+  width: 100%;
+  height: 100%;
+}
+
+.device-status-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--glass-border);
+}
+
+.status-row strong {
+  color: var(--text-primary);
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.control-note {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
 .chart-controls {
   display: flex;
   gap: 8px;
