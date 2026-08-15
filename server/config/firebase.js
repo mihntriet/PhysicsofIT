@@ -52,28 +52,24 @@ function isFirebaseInitialized() {
   return getApps().length > 0;
 }
 
-function getRealtimeDatabase() {
+function getInitializedApp() {
   if (!isFirebaseInitialized()) {
     throw new Error('Firebase Admin has not been initialized.');
   }
 
-  return getDatabase(getApp());
+  return getApp();
+}
+
+function getRealtimeDatabase() {
+  return getDatabase(getInitializedApp());
 }
 
 function getFirestore() {
-  if (!isFirebaseInitialized()) {
-    throw new Error('Firebase Admin has not been initialized.');
-  }
-
-  return getAdminFirestore(getApp());
+  return getAdminFirestore(getInitializedApp());
 }
 
 function getFirebaseAuth() {
-  if (!isFirebaseInitialized()) {
-    throw new Error('Firebase Admin has not been initialized.');
-  }
-
-  return getAuth(getApp());
+  return getAuth(getInitializedApp());
 }
 
 async function deleteFirebaseApp() {
