@@ -430,7 +430,10 @@ body::before {
 .dashboard-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto auto;
+  grid-template-areas:
+    "gas chart"
+    "buzzer led"
+    "status wifi";
   gap: 24px;
 }
 
@@ -493,6 +496,7 @@ body::before {
 
 /* ── Gas Sensor Card ── */
 .gas-sensor-card {
+  grid-area: gas;
   animation-delay: 0.1s;
 }
 
@@ -570,7 +574,15 @@ body::before {
 
 /* ── Device Control Card ── */
 .control-card {
-  animation-delay: 0.2s;
+  animation-delay: 0.3s;
+}
+
+.buzzer-control-card {
+  grid-area: buzzer;
+}
+
+.led-control-card {
+  grid-area: led;
 }
 
 .control-group {
@@ -693,13 +705,19 @@ body::before {
 
 /* ── Chart Card ── */
 .chart-card {
-  grid-column: 1 / -1;
-  animation-delay: 0.3s;
+  grid-area: chart;
+  animation-delay: 0.2s;
+}
+
+.chart-card .card-header {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 16px;
 }
 
 .chart-wrapper {
   position: relative;
-  height: 320px;
+  height: 220px;
   margin-top: 8px;
 }
 
@@ -711,6 +729,37 @@ body::before {
 #gas-chart {
   width: 100%;
   height: 100%;
+}
+
+.chart-wrapper .apexcharts-canvas,
+.chart-wrapper .apexcharts-svg {
+  height: 100% !important;
+}
+
+.device-status-card {
+  grid-area: status;
+  animation-delay: 0.4s;
+}
+
+.wifi-card {
+  grid-area: wifi;
+  animation-delay: 0.5s;
+}
+
+.wifi-card .card-header {
+  margin-bottom: 12px;
+}
+
+.wifi-card-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.wifi-card .btn-primary {
+  width: auto;
+  flex-shrink: 0;
 }
 
 .device-status-grid {
@@ -741,6 +790,7 @@ body::before {
 
 .chart-controls {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -838,10 +888,13 @@ body::before {
 @media (max-width: 1024px) {
   .dashboard-grid {
     grid-template-columns: 1fr;
-  }
-
-  .chart-card {
-    grid-column: 1;
+    grid-template-areas:
+      "gas"
+      "chart"
+      "buzzer"
+      "led"
+      "status"
+      "wifi";
   }
 }
 
@@ -868,6 +921,20 @@ body::before {
 }
 
 @media (max-width: 480px) {
+  .card {
+    padding: 22px;
+  }
+
+  .wifi-card-body {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .wifi-card .btn-primary {
+    width: 100%;
+  }
+
   .control-item {
     flex-direction: column;
     gap: 16px;
@@ -950,4 +1017,18 @@ body::before {
     opacity: 0;
     transform: translateY(10px);
   }
+}
+
+/* ── Pushsafer Pairing ── */
+.pair-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+
+.pair-inline strong {
+  color: var(--accent);
+  font-family: 'JetBrains Mono', monospace;
 }

@@ -33,24 +33,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  async function readProfile(uid) {
-    const snapshot = await firestore.collection('users').doc(uid).get();
-    return snapshot.exists ? snapshot.data() : null;
-  }
-
   async function routeAuthenticatedUser(user) {
-    const profile = await readProfile(user.uid);
-    if (!profile) {
-      showMessage(loginMessage, 'Tài khoản chưa có hồ sơ Firestore. Vui lòng liên hệ quản trị viên.');
-      await auth.signOut();
-      return;
-    }
-    if (profile.status === 'active') {
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch('/api/device/status', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showMessage(loginMessage, data.error || 'Tài khoản chưa có hồ sơ hợp lệ. Vui lòng thử lại.');
+        await auth.signOut();
+        return;
+      }
       window.location.href = '/dashboard';
-      return;
+    } catch (error) {
+      showMessage(loginMessage, `Không thể kiểm tra hồ sơ: ${error.message}`);
+      await auth.signOut();
     }
-    showMessage(loginMessage, 'Tài khoản đã đăng ký và đang chờ được cấp quyền.', 'success');
-    await auth.signOut();
   }
 
   document.getElementById('show-register')?.addEventListener('click', (event) => {
@@ -102,13 +101,13 @@ document.addEventListener('DOMContentLoaded', () => {
   registerForm?.addEventListener('submit', async (event) => {
     event.preventDefault();
     const button = document.getElementById('register-btn');
-    const fullName = document.getElementById('register-full-name').value.trim();
+    const productCode = document.getElementById('register-product-code').value.trim().toUpperCase();
     const email = document.getElementById('register-email').value.trim();
     const password = document.getElementById('register-password').value;
     const confirmPassword = document.getElementById('register-confirm').value;
 
-    if (!fullName) {
-      showMessage(registerMessage, 'Vui lòng nhập họ và tên.');
+    if (!productCode || productCode.length !== 6) {
+      showMessage(registerMessage, 'Mã sản phẩm phải gồm 6 ký tự.');
       return;
     }
     if (password.length < 6) {
@@ -124,20 +123,36 @@ document.addEventListener('DOMContentLoaded', () => {
     registering = true;
     let createdUser = null;
     try {
+      const validateResponse = await fetch('/api/product/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productCode }),
+      });
+      const validateData = await validateResponse.json();
+      if (!validateData.valid) {
+        showMessage(registerMessage, 'Mã sản phẩm không hợp lệ.');
+        return;
+      }
+
       const credential = await auth.createUserWithEmailAndPassword(email, password);
       createdUser = credential.user;
-      await firestore.collection('users').doc(credential.user.uid).set({
-        uid: credential.user.uid,
-        fullName,
-        email,
-        role: 'user',
-        status: 'pending',
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      const idToken = await createdUser.getIdToken();
+      const profileRes = await fetch('/api/user/profile', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ productCode }),
       });
+      const profileData = await profileRes.json();
+      if (!profileRes.ok || !profileData.success) {
+        throw new Error(profileData.error || 'Không thể tạo hồ sơ tài khoản.');
+      }
       await auth.signOut();
       showMessage(
         registerMessage,
-        'Tài khoản đã đăng ký và đang chờ được cấp quyền.',
+        'Đăng ký thành công! Bạn có thể đăng nhập ngay.',
         'success'
       );
       registerForm.reset();
