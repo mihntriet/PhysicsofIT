@@ -1,13 +1,16 @@
-const GAS_ALERT_THRESHOLD = 2500;
+const GAS_ALERT_THRESHOLD = 1800;
 const ADC_MAX = 4095;
 const LIVE_POLL_INTERVAL_MS = 5000;
-const HISTORY_POLL_INTERVAL_MS = 30000;
+const HISTORY_POLL_INTERVAL_MS = 5000;
 const VIETNAM_UTC_OFFSET_MS = 7 * 60 * 60 * 1000;
 
 let gasChart = null;
+let chartPoints = new Map();
 let initialized = false;
 let polling = false;
+let historyRequestId = 0;
 let lastBuzzerState = 'UNKNOWN';
+let lastLedState = 'UNKNOWN';
 let latestAlertId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -26,7 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       const profileSnapshot = await firestore.collection('users').doc(user.uid).get();
       const profile = profileSnapshot.exists ? profileSnapshot.data() : null;
-      if (!profile || profile.status !== 'active') {
+      if (!profile) {
         await auth.signOut();
         window.location.href = '/';
         return;
@@ -49,6 +52,7 @@ async function initializeDashboard() {
     console.error(`Không thể khởi tạo biểu đồ: ${error.message}`);
   }
   initializeControls();
+  initializePairing();
   await Promise.allSettled([refreshLiveData(), refreshHistory(100), refreshAlerts()]);
   window.setInterval(refreshLiveData, LIVE_POLL_INTERVAL_MS);
   window.setInterval(() => refreshHistory(getSelectedHistoryLimit()), HISTORY_POLL_INTERVAL_MS);
@@ -66,7 +70,8 @@ async function refreshLiveData() {
     ]);
 
     if (latestResult.status === 'fulfilled') {
-      updateGasDisplay(latestResult.value.data);
+      const latest = latestResult.value.data;
+      updateGasDisplay(latest);
     } else if (latestResult.reason.status !== 404) {
       throw latestResult.reason;
     }
@@ -89,16 +94,36 @@ async function refreshLiveData() {
 async function refreshHistory(limit) {
   if (!gasChart) return;
 
+  const requestId = ++historyRequestId;
   try {
     const response = await getGasHistory(limit);
-    const points = response.data.map((reading) => ({
-      x: Number(reading.timestamp) + VIETNAM_UTC_OFFSET_MS,
-      y: reading.gasRaw,
-    }));
-    gasChart.updateSeries([{ name: 'Nồng độ Gas (ADC)', data: points }], false);
+    if (requestId !== historyRequestId) return;
+    updateChart(response.data, limit);
   } catch (error) {
+    if (requestId !== historyRequestId) return;
     handleApiError(error, false);
   }
+}
+
+function updateChart(readings, limit = getSelectedHistoryLimit()) {
+  if (!gasChart) return;
+
+  const savedPoints = new Map();
+  readings.forEach((reading) => {
+    const timestamp = Number(reading.timestamp);
+    const gasRaw = Number(reading.gasRaw);
+    if (Number.isFinite(timestamp) && Number.isFinite(gasRaw)) {
+      savedPoints.set(timestamp, { x: timestamp + VIETNAM_UTC_OFFSET_MS, y: gasRaw });
+    }
+  });
+
+  chartPoints = new Map(
+    [...savedPoints.entries()].sort(([a], [b]) => a - b).slice(-limit)
+  );
+  gasChart.updateSeries([{
+    name: 'Nồng độ Gas (ADC)',
+    data: [...chartPoints.values()],
+  }], false);
 }
 
 async function refreshAlerts() {
@@ -147,10 +172,10 @@ function updateDeviceStatus(data) {
   const availability = live.availability || data.availability || 'UNKNOWN';
   const buzzerState = live.buzzerState || data.buzzerState || 'UNKNOWN';
   const buzzerReason = live.buzzerReason || data.buzzerReason || 'UNKNOWN';
+  const ledState = live.ledState || data.ledState || 'UNKNOWN';
   const mqttConnected = Boolean(live.brokerConnected);
 
   setText('device-availability', availability);
-  setText('mqtt-broker-status', mqttConnected ? 'CONNECTED' : 'DISCONNECTED');
   setText('gas-state', data.gasState || 'UNKNOWN');
   setText('buzzer-reason', buzzerReason);
 
@@ -170,9 +195,39 @@ function updateDeviceStatus(data) {
     stateElement.textContent = buzzerState === 'UNKNOWN' ? 'CHƯA XÁC ĐỊNH' : `ĐANG ${buzzerState === 'ON' ? 'BẬT' : 'TẮT'}`;
     stateElement.style.color = buzzerState === 'ON' ? 'var(--danger)' : 'var(--text-muted)';
   }
+
+  lastLedState = ledState;
+  const ledToggle = document.getElementById('led-toggle');
+  const ledStatusText = document.getElementById('led-status-text');
+  if (ledToggle) {
+    ledToggle.checked = ledState === 'ON';
+    ledToggle.disabled = availability !== 'ONLINE' || !mqttConnected || ledState === 'UNKNOWN';
+  }
+  if (ledStatusText) {
+    ledStatusText.textContent = ledState === 'UNKNOWN' ? 'CHƯA XÁC ĐỊNH' : `ĐANG ${ledState === 'ON' ? 'BẬT' : 'TẮT'}`;
+    ledStatusText.style.color = ledState === 'ON' ? 'var(--accent)' : 'var(--text-muted)';
+  }
 }
 
 function initializeControls() {
+  const wifiConfigButton = document.getElementById('wifi-config-btn');
+  wifiConfigButton?.addEventListener('click', async () => {
+    const confirmed = window.confirm(
+      'Thiết bị sẽ tạm ngắt kết nối để mở chế độ cấu hình Wi-Fi. Bạn có muốn tiếp tục?'
+    );
+    if (!confirmed) return;
+
+    wifiConfigButton.disabled = true;
+    try {
+      await requestWifiConfig();
+      showToast('Đã gửi lệnh. Hãy kết nối vào Wi-Fi của ESP32 để cấu hình mạng mới.', 'warning');
+    } catch (error) {
+      handleApiError(error);
+    } finally {
+      wifiConfigButton.disabled = false;
+    }
+  });
+
   const toggle = document.getElementById('buzzer-toggle');
   toggle?.addEventListener('click', async (event) => {
     event.preventDefault();
@@ -183,8 +238,22 @@ function initializeControls() {
     try {
       await publishBuzzerCommand(command);
       showToast(`Đã publish lệnh ${command}; đang chờ trạng thái thực tế từ ESP32.`, 'warning');
-      window.setTimeout(refreshLiveData, 1000);
     } catch (error) {
+      handleApiError(error);
+    } finally {
+      window.setTimeout(refreshLiveData, 1200);
+    }
+  });
+
+  const ledToggle = document.getElementById('led-toggle');
+  ledToggle?.addEventListener('change', async () => {
+    const command = ledToggle.checked ? 'ON' : 'OFF';
+    ledToggle.disabled = true;
+    try {
+      await publishLedCommand(command);
+      showToast(`Đã ${command === 'ON' ? 'bật' : 'tắt'} LED.`, 'success');
+    } catch (error) {
+      ledToggle.checked = !ledToggle.checked;
       handleApiError(error);
     } finally {
       window.setTimeout(refreshLiveData, 1200);
@@ -202,6 +271,53 @@ function initializeControls() {
   document.querySelector('.alert-close')?.addEventListener('click', hideAlertBanner);
 }
 
+function initializePairing() {
+  const startBtn = document.getElementById('pair-start-btn');
+  const pairUI = document.getElementById('pair-ui');
+  const confirmBtn = document.getElementById('pair-confirm-btn');
+  const cancelBtn = document.getElementById('pair-cancel-btn');
+
+  function resetPairUI() {
+    pairUI?.classList.add('hidden');
+    startBtn?.classList.remove('hidden');
+    if (startBtn) startBtn.disabled = false;
+    if (confirmBtn) confirmBtn.disabled = false;
+  }
+
+  startBtn?.addEventListener('click', async () => {
+    startBtn.disabled = true;
+    try {
+      const response = await startPairing();
+      document.getElementById('pair-guest-id').textContent = response.data.guestId;
+      document.getElementById('pair-code').textContent = response.data.code;
+      startBtn.classList.add('hidden');
+      pairUI.classList.remove('hidden');
+    } catch (error) {
+      handleApiError(error);
+      startBtn.disabled = false;
+    }
+  });
+
+  confirmBtn?.addEventListener('click', async () => {
+    const code = document.getElementById('pair-code').textContent;
+    confirmBtn.disabled = true;
+    try {
+      await confirmPairing(code);
+      showToast('Đã thêm thiết bị.', 'success');
+      resetPairUI();
+    } catch (error) {
+      if (error.status === 404) {
+        showToast(error.message, 'warning');
+      } else {
+        handleApiError(error);
+      }
+      confirmBtn.disabled = false;
+    }
+  });
+
+  cancelBtn?.addEventListener('click', resetPairUI);
+}
+
 async function initializeChart() {
   const chartElement = document.getElementById('gas-chart');
   if (!chartElement) return;
@@ -209,7 +325,7 @@ async function initializeChart() {
   gasChart = new ApexCharts(chartElement, {
     chart: {
       type: 'line',
-      height: 320,
+      height: 220,
       animations: { enabled: false },
       toolbar: { show: false },
       foreColor: '#94a3b8',
@@ -221,7 +337,6 @@ async function initializeChart() {
     xaxis: {
       type: 'datetime',
       labels: { datetimeUTC: true },
-      title: { text: 'Giờ Việt Nam (UTC+7)' },
     },
     yaxis: { min: 0, max: ADC_MAX, tickAmount: 8 },
     grid: { borderColor: 'rgba(255, 255, 255, 0.1)' },
@@ -232,7 +347,7 @@ async function initializeChart() {
       yaxis: [{
         y: GAS_ALERT_THRESHOLD,
         borderColor: '#ff4444',
-        label: { text: 'Ngưỡng cảnh báo 2500', style: { background: '#ff4444' } },
+        label: { text: 'Ngưỡng cảnh báo 1800', style: { background: '#ff4444' } },
       }],
     },
     noData: { text: 'Chưa có dữ liệu lịch sử' },

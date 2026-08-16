@@ -16,6 +16,13 @@
           <span id="status-dot" class="status-dot"></span>
           <span id="status-text">Đang kết nối...</span>
         </div>
+        <button id="pair-start-btn" class="btn btn-ghost">➕ Thêm thiết bị</button>
+        <div id="pair-ui" class="pair-inline hidden">
+          <span>Guest ID: <strong id="pair-guest-id"></strong></span>
+          <span>Mã: <strong id="pair-code"></strong></span>
+          <button id="pair-confirm-btn" class="btn btn-ghost">Xác nhận</button>
+          <button id="pair-cancel-btn" class="btn btn-ghost">Hủy</button>
+        </div>
         <span id="user-email" style="color: var(--text-muted); font-size: 0.8125rem;"></span>
         <button id="logout-btn" class="btn btn-ghost btn-logout">🚪 Đăng xuất</button>
       </div>
@@ -36,21 +43,33 @@
           </div>
           <div class="gas-value-display">
             <div id="gas-value" class="gas-value-number">--</div>
-            <div class="gas-value-unit">Giá trị ADC (0 - 4095)</div>
           </div>
           <div class="gas-threshold-bar">
             <div class="threshold-label">
               <span>Hiện tại: <strong id="threshold-current">--</strong></span>
-              <span>Ngưỡng: <strong id="threshold-value">2500</strong></span>
+              <span>Ngưỡng: <strong id="threshold-value">1800</strong></span>
             </div>
             <div class="threshold-track">
               <div id="threshold-fill" class="threshold-fill" style="width: 0%"></div>
-              <div class="threshold-marker" style="left: 61.05%"></div>
+              <div class="threshold-marker" style="left: 43.96%"></div>
             </div>
           </div>
         </section>
 
-        <section class="card control-card">
+        <section class="card chart-card">
+          <div class="card-header">
+            <div class="card-title"><span class="card-icon">📊</span>Biểu đồ Nồng độ Gas</div>
+            <div class="chart-controls">
+              <button class="btn-chip" data-limit="20">20 mẫu</button>
+              <button class="btn-chip" data-limit="50">50 mẫu</button>
+              <button class="btn-chip active" data-limit="100">100 mẫu</button>
+              <button class="btn-chip" data-limit="200">200 mẫu</button>
+            </div>
+          </div>
+          <div class="chart-wrapper"><div id="gas-chart"></div></div>
+        </section>
+
+        <section class="card control-card buzzer-control-card">
           <div class="card-header">
             <div class="card-title"><span class="card-icon">🎛️</span>Điều khiển Buzzer</div>
           </div>
@@ -73,29 +92,46 @@
           </div>
         </section>
 
-        <section class="card wifi-card">
+        <section class="card device-status-card">
           <div class="card-header">
             <div class="card-title"><span class="card-icon">📡</span>Trạng thái Thiết bị</div>
           </div>
           <div class="device-status-grid">
             <div class="status-row"><span>ESP32</span><strong id="device-availability">UNKNOWN</strong></div>
-            <div class="status-row"><span>Mosquitto</span><strong id="mqtt-broker-status">DISCONNECTED</strong></div>
             <div class="status-row"><span>Trạng thái gas</span><strong id="gas-state">UNKNOWN</strong></div>
           </div>
-          <p class="control-note">Cấu hình Wi-Fi và broker được thực hiện trên Captive Portal của ESP32 tại 192.168.4.1 khi thiết bị ở chế độ cấu hình.</p>
         </section>
 
-        <section class="card chart-card">
+        <section class="card control-card led-control-card">
           <div class="card-header">
-            <div class="card-title"><span class="card-icon">📊</span>Biểu đồ Nồng độ Gas</div>
-            <div class="chart-controls">
-              <button class="btn-chip" data-limit="20">20 mẫu</button>
-              <button class="btn-chip" data-limit="50">50 mẫu</button>
-              <button class="btn-chip active" data-limit="100">100 mẫu</button>
-              <button class="btn-chip" data-limit="200">200 mẫu</button>
-            </div>
+            <div class="card-title"><span class="card-icon">💡</span>Điều khiển LED</div>
           </div>
-          <div class="chart-wrapper"><div id="gas-chart"></div></div>
+          <div class="control-group">
+            <div class="control-item">
+              <div class="control-info">
+                <div class="control-icon led">🌈</div>
+                <div>
+                  <div class="control-name">RGB LED</div>
+                  <div class="control-status">Trạng thái: <span id="led-status-text" class="status-text">CHƯA XÁC ĐỊNH</span></div>
+                </div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="led-toggle" disabled />
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <p class="control-note">Khi bật, màu LED tự động theo trạng thái gas và kết nối. Không hỗ trợ chọn màu thủ công.</p>
+          </div>
+        </section>
+
+        <section class="card wifi-card">
+          <div class="card-header">
+            <div class="card-title"><span class="card-icon">📶</span>Cấu hình Wi-Fi</div>
+          </div>
+          <div class="wifi-card-body">
+            <p class="control-note">Thiết bị sẽ tạm ngắt kết nối và mở Captive Portal để bạn nhập Wi-Fi mới.</p>
+            <button id="wifi-config-btn" class="btn btn-primary">Cấu hình Wi-Fi</button>
+          </div>
         </section>
       </div>
     </main>
@@ -107,6 +143,6 @@
   <script src="https://cdn.jsdelivr.net/npm/apexcharts@6.7.1/dist/apexcharts.min.js"></script>
   <script src="js/firebase-config.js"></script>
   <script src="js/api.js"></script>
-  <script src="js/dashboard.js?v=20260809-4"></script>
+  <script src="js/dashboard.js?v=20260815-2"></script>
 </body>
 </html>

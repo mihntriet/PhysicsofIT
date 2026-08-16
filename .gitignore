@@ -7,14 +7,9 @@ server/node_modules/
 server/.env
 serviceAccountKey.json
 server/config/serviceAccountKey.json
-mosquitto/password_file
-mosquitto/passwd
-mosquitto/*.password
 
 # Logs and runtime files
 *.log
-mosquitto/data/
-mosquitto/log/
 
 # IDE and operating system
 .vscode/

@@ -14,7 +14,6 @@ let httpServer = null;
 let shuttingDown = false;
 
 app.use(express.json({ limit: '32kb' }));
-app.use(express.urlencoded({ extended: false }));
 app.use(express.static(clientPath));
 app.use('/api', apiRoutes);
 
@@ -26,13 +25,23 @@ async function startServer() {
   initializeFirebase();
 
   mqttService.startMQTT({
-    onGasData: (data) => firebaseService.saveGasData(data),
-    onGasAlert: async (data) => {
-      const transition = await firebaseService.saveGasAlert(data);
-      void alertService.handleGasTransition(data, transition);
+    onGasData: async (data) => {
+      await firebaseService.saveGasData(data);
+      if (!data.ready) return;
+
+      const alertData = {
+        deviceId: data.deviceId,
+        gasRaw: data.gasRaw,
+        state: data.alert ? 'ALERT' : 'SAFE',
+      };
+      const transition = await firebaseService.saveGasAlert(alertData);
+      if (transition.previousState === 'SAFE' && transition.state === 'ALERT') {
+        void alertService.handleGasTransition(alertData, transition);
+      }
     },
-    onBuzzerStatus: (data) => firebaseService.saveBuzzerStatus(data),
-    onAvailability: (availability) => firebaseService.saveAvailability(availability),
+    onBuzzerStatus: (data) => firebaseService.saveBuzzerStatus(data.deviceId, data),
+    onLedStatus: (data) => firebaseService.saveLedStatus(data.deviceId, data.state),
+    onAvailability: (data) => firebaseService.saveAvailability(data.deviceId, data.availability),
   });
 
   const host = process.env.HOST || '0.0.0.0';

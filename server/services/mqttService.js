@@ -3,24 +3,43 @@ const mqtt = require('mqtt');
 let client = null;
 let handlers = {};
 let handlerChain = Promise.resolve();
+let reconnectNoticeShown = false;
+let lastConnectionError = null;
+let brokerConnected = false;
 
-const status = {
-  brokerConnected: false,
-  availability: 'UNKNOWN',
-  buzzerState: 'UNKNOWN',
-  buzzerReason: 'UNKNOWN',
-  lastMessageAt: null,
-};
+const deviceStates = new Map();
+
+function getOrCreateDeviceState(deviceId) {
+  if (!deviceStates.has(deviceId)) {
+    deviceStates.set(deviceId, {
+      availability: 'UNKNOWN',
+      buzzerState: 'UNKNOWN',
+      buzzerReason: 'UNKNOWN',
+      ledState: 'UNKNOWN',
+      lastMessageAt: null,
+    });
+  }
+  return deviceStates.get(deviceId);
+}
+
+function resetLiveStatus() {
+  brokerConnected = false;
+  deviceStates.clear();
+}
+
+function handleDisconnect() {
+  const wasConnected = brokerConnected;
+  resetLiveStatus();
+  if (wasConnected) {
+    console.log('[MQTT] Disconnected');
+  }
+}
 
 function getConfig() {
-  const deviceId = process.env.DEVICE_ID || 'ESP32-GAS-MONITOR';
   const required = {
     brokerUrl: process.env.MQTT_BROKER_URL,
-    gasData: process.env.MQTT_TOPIC_GAS_DATA,
-    gasAlert: process.env.MQTT_TOPIC_GAS_ALERT,
-    buzzerControl: process.env.MQTT_TOPIC_CONTROL_BUZZER,
-    buzzerState: process.env.MQTT_TOPIC_BUZZER_STATE,
-    availability: process.env.MQTT_TOPIC_AVAILABILITY,
+    username: process.env.MQTT_USERNAME,
+    password: process.env.MQTT_PASSWORD,
   };
 
   for (const [name, value] of Object.entries(required)) {
@@ -29,12 +48,18 @@ function getConfig() {
     }
   }
 
-  return {
-    ...required,
-    deviceId,
-    username: process.env.MQTT_USERNAME || undefined,
-    password: process.env.MQTT_PASSWORD || undefined,
-  };
+  let brokerUrl;
+  try {
+    brokerUrl = new URL(required.brokerUrl);
+  } catch {
+    throw new Error('MQTT_BROKER_URL must be a valid mqtts:// URL.');
+  }
+
+  if (brokerUrl.protocol !== 'mqtts:' || brokerUrl.port !== '8883') {
+    throw new Error('MQTT_BROKER_URL must use mqtts:// and port 8883.');
+  }
+
+  return required;
 }
 
 function parseJson(message) {
@@ -48,28 +73,21 @@ function parseJson(message) {
   }
 }
 
-function validDeviceAndGas(payload, deviceId) {
-  return payload
-    && payload.deviceId === deviceId
-    && typeof payload.gasRaw === 'number'
-    && Number.isFinite(payload.gasRaw)
-    && payload.gasRaw >= 0;
+function parseTopic(topic) {
+  const parts = topic.split('/');
+  if (parts.length !== 4 || parts[0] !== 'devices') return null;
+  return { deviceId: parts[1], category: parts[2], type: parts[3] };
 }
 
 function validateGasData(message, deviceId) {
   const payload = parseJson(message);
-  if (!validDeviceAndGas(payload, deviceId)
+  if (!payload
+      || payload.deviceId !== deviceId
+      || typeof payload.gasRaw !== 'number'
+      || !Number.isFinite(payload.gasRaw)
+      || payload.gasRaw < 0
       || typeof payload.alert !== 'boolean'
       || typeof payload.ready !== 'boolean') {
-    return null;
-  }
-  return payload;
-}
-
-function validateGasAlert(message, deviceId) {
-  const payload = parseJson(message);
-  if (!validDeviceAndGas(payload, deviceId)
-      || !['ALERT', 'SAFE'].includes(payload.state)) {
     return null;
   }
   return payload;
@@ -98,11 +116,16 @@ function invokeHandler(name, payload) {
     });
 }
 
-function handleMessage(topic, message, config) {
-  status.lastMessageAt = Date.now();
+function handleMessage(topic, message) {
+  const parsed = parseTopic(topic);
+  if (!parsed) return;
 
-  if (topic === config.gasData) {
-    const payload = validateGasData(message, config.deviceId);
+  const { deviceId, category, type } = parsed;
+  const state = getOrCreateDeviceState(deviceId);
+  state.lastMessageAt = Date.now();
+
+  if (category === 'gas' && type === 'data') {
+    const payload = validateGasData(message, deviceId);
     if (!payload) {
       console.warn(`Ignored invalid MQTT gas payload on ${topic}.`);
       return;
@@ -111,123 +134,147 @@ function handleMessage(topic, message, config) {
     return;
   }
 
-  if (topic === config.gasAlert) {
-    const payload = validateGasAlert(message, config.deviceId);
-    if (!payload) {
-      console.warn(`Ignored invalid MQTT gas alert on ${topic}.`);
-      return;
-    }
-    invokeHandler('onGasAlert', payload);
-    return;
-  }
-
-  if (topic === config.buzzerState) {
+  if (category === 'status' && type === 'buzzer') {
     const payload = validateBuzzerStatus(message);
     if (!payload) {
       console.warn(`Ignored invalid MQTT buzzer status on ${topic}.`);
       return;
     }
-    status.buzzerState = payload.state;
-    status.buzzerReason = payload.reason;
-    invokeHandler('onBuzzerStatus', payload);
+    state.buzzerState = payload.state;
+    state.buzzerReason = payload.reason;
+    invokeHandler('onBuzzerStatus', { deviceId, ...payload });
     return;
   }
 
-  if (topic === config.availability) {
+  if (category === 'status' && type === 'led') {
+    const ledState = message.toString('utf8').trim().toUpperCase();
+    if (!['ON', 'OFF'].includes(ledState)) {
+      console.warn(`Ignored invalid MQTT LED status on ${topic}.`);
+      return;
+    }
+    state.ledState = ledState;
+    invokeHandler('onLedStatus', { deviceId, state: ledState });
+    return;
+  }
+
+  if (category === 'status' && type === 'availability') {
     const availability = message.toString('utf8').trim().toUpperCase();
     if (!['ONLINE', 'OFFLINE'].includes(availability)) {
       console.warn(`Ignored invalid MQTT availability on ${topic}.`);
       return;
     }
-    status.availability = availability;
-    invokeHandler('onAvailability', availability);
+    state.availability = availability;
+    invokeHandler('onAvailability', { deviceId, availability });
   }
 }
 
 function startMQTT(eventHandlers = {}) {
   if (client) {
-    return client;
+    return;
   }
 
   const config = getConfig();
   handlers = eventHandlers;
   handlerChain = Promise.resolve();
+  reconnectNoticeShown = false;
+  lastConnectionError = null;
 
+  console.log('[MQTT] Connecting...');
   client = mqtt.connect(config.brokerUrl, {
     clientId: `gas-monitor-server-${process.pid}`,
     clean: true,
     connectTimeout: 10000,
     reconnectPeriod: 5000,
+    resubscribe: false,
     username: config.username,
     password: config.password,
   });
 
   client.on('connect', () => {
-    status.brokerConnected = true;
-    console.log(`Connected to Mosquitto at ${config.brokerUrl}.`);
+    brokerConnected = true;
+    reconnectNoticeShown = false;
+    lastConnectionError = null;
+    console.log('[MQTT] Connected');
 
     const topics = [
-      config.gasData,
-      config.gasAlert,
-      config.buzzerState,
-      config.availability,
+      'devices/+/gas/data',
+      'devices/+/status/buzzer',
+      'devices/+/status/led',
+      'devices/+/status/availability',
     ];
 
     client.subscribe(topics, { qos: 1 }, (error) => {
       if (error) {
-        console.error(`MQTT subscribe failed: ${error.message}`);
-        return;
+        console.error(`[MQTT] Error: subscribe failed: ${error.message}`);
       }
-      console.log(`Subscribed to ${topics.length} device topics.`);
     });
-
   });
 
-  client.on('message', (topic, message) => handleMessage(topic, message, config));
-  client.on('reconnect', () => console.log('Reconnecting to Mosquitto...'));
-  client.on('offline', () => {
-    status.brokerConnected = false;
-    status.availability = 'UNKNOWN';
-    status.buzzerState = 'UNKNOWN';
-    status.buzzerReason = 'UNKNOWN';
-    console.warn('Mosquitto connection is offline.');
+  client.on('message', (topic, message) => handleMessage(topic, message));
+  client.on('reconnect', () => {
+    if (!reconnectNoticeShown) {
+      console.log('[MQTT] Reconnecting...');
+      reconnectNoticeShown = true;
+    }
   });
-  client.on('close', () => {
-    status.brokerConnected = false;
-    status.availability = 'UNKNOWN';
-    status.buzzerState = 'UNKNOWN';
-    status.buzzerReason = 'UNKNOWN';
-  });
+  client.on('offline', handleDisconnect);
+  client.on('close', handleDisconnect);
   client.on('error', (error) => {
-    console.error(`MQTT error: ${error.message}`);
+    const message = String(error.message || '').trim();
+    if (!message || message === lastConnectionError) return;
+    console.error(`[MQTT] Error: ${message}`);
+    lastConnectionError = message;
   });
-
-  return client;
 }
 
-function publishBuzzerCommand(command) {
-  if (!['ON', 'OFF'].includes(command)) {
-    return Promise.reject(new Error('Buzzer command must be ON or OFF.'));
-  }
-
+function publishCommand(topic, command) {
   if (!client || !client.connected) {
-    return Promise.reject(new Error('Mosquitto is not connected.'));
+    return Promise.reject(new Error('MQTT is not connected.'));
   }
-
-  const topic = getConfig().buzzerControl;
   return new Promise((resolve, reject) => {
     client.publish(topic, command, { qos: 1, retain: false }, (error) => {
       if (error) {
         reject(error);
         return;
       }
-      resolve({ topic, command });
+      resolve({ command });
     });
   });
 }
 
+function publishBuzzerCommand(productCode, command) {
+  if (!['ON', 'OFF'].includes(command)) {
+    return Promise.reject(new Error('Buzzer command must be ON or OFF.'));
+  }
+  return publishCommand(`devices/${productCode}/control/buzzer`, command);
+}
+
+function publishLedCommand(productCode, command) {
+  if (!['ON', 'OFF'].includes(command)) {
+    return Promise.reject(new Error('LED command must be ON or OFF.'));
+  }
+  return publishCommand(`devices/${productCode}/control/led`, command);
+}
+
+function publishWifiConfigCommand(productCode) {
+  return publishCommand(`devices/${productCode}/control/wifi-config`, 'START');
+}
+
 function getMQTTStatus() {
-  return { ...status };
+  return { brokerConnected };
+}
+
+function getDeviceState(productCode) {
+  if (!deviceStates.has(productCode)) {
+    return {
+      availability: 'UNKNOWN',
+      buzzerState: 'UNKNOWN',
+      buzzerReason: 'UNKNOWN',
+      ledState: 'UNKNOWN',
+      lastMessageAt: null,
+    };
+  }
+  return { ...deviceStates.get(productCode) };
 }
 
 async function stopMQTT() {
@@ -241,16 +288,17 @@ async function stopMQTT() {
 
   handlers = {};
   handlerChain = Promise.resolve();
-  status.brokerConnected = false;
-  status.availability = 'UNKNOWN';
-  status.buzzerState = 'UNKNOWN';
-  status.buzzerReason = 'UNKNOWN';
+  reconnectNoticeShown = false;
+  lastConnectionError = null;
+  resetLiveStatus();
 }
 
 module.exports = {
   startMQTT,
   stopMQTT,
   publishBuzzerCommand,
+  publishLedCommand,
+  publishWifiConfigCommand,
   getMQTTStatus,
-  validateGasData,
+  getDeviceState,
 };
