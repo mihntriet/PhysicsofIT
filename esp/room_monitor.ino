@@ -408,10 +408,9 @@ void startWifiSetupMode() {
   char suffix[7];
   snprintf(suffix, sizeof(suffix), "%06llX", ESP.getEfuseMac() & 0xFFFFFFULL);
   String apName = "Gas_Monitor_" + String(suffix);
-  String apPassword = "GAS-" + String(suffix);
   IPAddress apIp(192, 168, 4, 1);
   WiFi.softAPConfig(apIp, apIp, IPAddress(255, 255, 255, 0));
-  WiFi.softAP(apName.c_str(), apPassword.c_str());
+  WiFi.softAP(apName.c_str());
 
   dnsServer.start(53, "*", apIp);
   portalServer.on("/", HTTP_GET, handlePortalRoot);
@@ -422,7 +421,10 @@ void startWifiSetupMode() {
   });
   portalServer.begin();
 
-  Serial.print("[WiFi] AP: ");
+  printLCD(0, "WiFi Config Mode");
+  printLCD(1, apName.c_str());
+
+  Serial.print("[WiFi] AP (No Pass): ");
   Serial.println(apName);
   Serial.println("[WiFi] Open http://192.168.4.1");
 }
