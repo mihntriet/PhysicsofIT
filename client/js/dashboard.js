@@ -11,7 +11,6 @@ let polling = false;
 let historyRequestId = 0;
 let lastBuzzerState = 'UNKNOWN';
 let lastLedState = 'UNKNOWN';
-let latestAlertId = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('logout-btn')?.addEventListener('click', async () => {
@@ -53,10 +52,9 @@ async function initializeDashboard() {
   }
   initializeControls();
   initializePairing();
-  await Promise.allSettled([refreshLiveData(), refreshHistory(100), refreshAlerts()]);
+  await Promise.allSettled([refreshLiveData(), refreshHistory(100)]);
   window.setInterval(refreshLiveData, LIVE_POLL_INTERVAL_MS);
   window.setInterval(() => refreshHistory(getSelectedHistoryLimit()), HISTORY_POLL_INTERVAL_MS);
-  window.setInterval(refreshAlerts, LIVE_POLL_INTERVAL_MS);
 }
 
 async function refreshLiveData() {
@@ -126,25 +124,6 @@ function updateChart(readings, limit = getSelectedHistoryLimit()) {
   }], false);
 }
 
-async function refreshAlerts() {
-  try {
-    const response = await getAlerts(10);
-    if (response.data.length === 0) return;
-
-    const latest = response.data[response.data.length - 1];
-    if (latest.id === latestAlertId) return;
-    latestAlertId = latest.id;
-
-    if (latest.state === 'ALERT') {
-      showAlertBanner(`CẢNH BÁO: mức gas ${latest.gasRaw} ADC. Hãy kiểm tra ngay.`);
-    } else {
-      hideAlertBanner();
-    }
-  } catch (error) {
-    handleApiError(error, false);
-  }
-}
-
 function updateGasDisplay(data) {
   const value = Number(data.gasRaw);
   const valueElement = document.getElementById('gas-value');
@@ -175,13 +154,21 @@ function updateDeviceStatus(data) {
   const ledState = live.ledState || data.ledState || 'UNKNOWN';
   const mqttConnected = Boolean(live.brokerConnected);
 
+  const gasState = data.gasState || 'UNKNOWN';
+  const gasStateText = gasState === 'ALERT' ? 'CẢNH BÁO' : (gasState === 'SAFE' ? 'SAFE' : gasState);
+
   setText('device-availability', availability);
-  setText('gas-state', data.gasState || 'UNKNOWN');
+  setText('gas-state', gasStateText);
   setText('buzzer-reason', buzzerReason);
 
   const availabilityElement = document.getElementById('device-availability');
   if (availabilityElement) {
     availabilityElement.style.color = availability === 'ONLINE' ? 'var(--accent)' : 'var(--danger)';
+  }
+
+  const gasStateElement = document.getElementById('gas-state');
+  if (gasStateElement) {
+    gasStateElement.style.color = gasState === 'ALERT' ? 'var(--danger)' : (gasState === 'SAFE' ? 'var(--accent)' : 'var(--text-muted)');
   }
 
   lastBuzzerState = buzzerState;
@@ -267,8 +254,6 @@ function initializeControls() {
     chip.classList.add('active');
     refreshHistory(Number.parseInt(chip.dataset.limit, 10) || 100);
   });
-
-  document.querySelector('.alert-close')?.addEventListener('click', hideAlertBanner);
 }
 
 function initializePairing() {
@@ -365,17 +350,6 @@ function updateServerConnection(connected) {
   const text = document.getElementById('status-text');
   if (dot) dot.className = `status-dot ${connected ? 'connected' : 'disconnected'}`;
   if (text) text.textContent = connected ? 'Server đã kết nối' : 'Mất kết nối server';
-}
-
-function showAlertBanner(message) {
-  const banner = document.getElementById('alert-banner');
-  const text = document.getElementById('alert-text');
-  if (text) text.textContent = message;
-  if (banner) banner.classList.add('active');
-}
-
-function hideAlertBanner() {
-  document.getElementById('alert-banner')?.classList.remove('active');
 }
 
 function setText(id, value) {

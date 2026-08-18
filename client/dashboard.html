@@ -32,12 +32,6 @@
       </div>
     </nav>
 
-    <div id="alert-banner" class="alert-banner">
-      <span class="alert-icon">🚨</span>
-      <span id="alert-text" class="alert-text">Cảnh báo rò rỉ khí gas!</span>
-      <button class="alert-close" aria-label="Đóng cảnh báo">×</button>
-    </div>
-
     <main class="dashboard-content">
       <div class="dashboard-grid">
         <section class="card gas-sensor-card">
@@ -100,16 +94,6 @@
           </div>
         </section>
 
-        <section class="card device-status-card">
-          <div class="card-header">
-            <div class="card-title"><span class="card-icon">📡</span>Trạng thái Thiết bị</div>
-          </div>
-          <div class="device-status-grid">
-            <div class="status-row"><span>ESP32</span><strong id="device-availability">UNKNOWN</strong></div>
-            <div class="status-row"><span>Trạng thái gas</span><strong id="gas-state">UNKNOWN</strong></div>
-          </div>
-        </section>
-
         <section class="card control-card led-control-card">
           <div class="card-header">
             <div class="card-title"><span class="card-icon">💡</span>Điều khiển LED</div>
@@ -131,6 +115,16 @@
             </div>
             <p class="control-note">Khi bật, màu LED tự động theo trạng thái gas và kết nối. Không hỗ trợ chọn màu thủ
               công.</p>
+          </div>
+        </section>
+
+        <section class="card device-status-card">
+          <div class="card-header">
+            <div class="card-title"><span class="card-icon">📡</span>Trạng thái Thiết bị</div>
+          </div>
+          <div class="device-status-grid">
+            <div class="status-row"><span>ESP32</span><strong id="device-availability">UNKNOWN</strong></div>
+            <div class="status-row"><span>Trạng thái gas</span><strong id="gas-state">UNKNOWN</strong></div>
           </div>
         </section>
 
