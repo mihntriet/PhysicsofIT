@@ -305,7 +305,7 @@ router.post('/pushsafer/pair/confirm', async (req, res) => {
           }
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     // 2. Fallback: Send a welcome notification via Pushsafer API which returns target device ID in message_ids
     if (!foundDeviceId) {
@@ -324,9 +324,31 @@ router.post('/pushsafer/pair/confirm', async (req, res) => {
       });
       const data = await response.json();
       if (data && data.status === 1 && data.message_ids) {
-        const parts = String(data.message_ids).split(',')[0].split(':');
-        if (parts.length >= 2 && parts[1]) {
-          foundDeviceId = parts[1].trim();
+        const allDeviceIds = String(data.message_ids)
+          .split(',')
+          .map((item) => {
+            const parts = item.split(':');
+            return parts.length >= 2 ? parts[1].trim() : '';
+          })
+          .filter(Boolean);
+
+        if (allDeviceIds.length > 0) {
+          const usersSnapshot = await getFirestore().collection('users').get();
+          const claimedByOthers = new Set();
+          usersSnapshot.forEach((docSnap) => {
+            if (docSnap.id !== req.uid) {
+              const uData = docSnap.data();
+              if (Array.isArray(uData.pushsaferDeviceIds)) {
+                uData.pushsaferDeviceIds.forEach((id) => claimedByOthers.add(String(id)));
+              }
+            }
+          });
+
+          // Tự động chọn thiết bị mới nhất chưa được tài khoản khác gán
+          const unassigned = allDeviceIds.filter((id) => !claimedByOthers.has(id));
+          foundDeviceId = unassigned.length > 0
+            ? unassigned[unassigned.length - 1]
+            : allDeviceIds[allDeviceIds.length - 1];
         }
       }
     }
@@ -341,9 +363,12 @@ router.post('/pushsafer/pair/confirm', async (req, res) => {
     await getFirestore()
       .collection('users')
       .doc(req.uid)
-      .update({
-        pushsaferDeviceIds: FieldValue.arrayUnion(foundDeviceId),
-      });
+      .set(
+        {
+          pushsaferDeviceIds: FieldValue.arrayUnion(foundDeviceId),
+        },
+        { merge: true }
+      );
 
     pendingPairs.delete(req.uid);
 
