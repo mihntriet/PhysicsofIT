@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,10 +8,13 @@
   <title>Gas Monitor - Dashboard</title>
   <link rel="stylesheet" href="css/style.css" />
 </head>
+
 <body>
   <div class="dashboard-page">
     <nav class="navbar">
-      <div class="navbar-brand"><div class="brand-icon">🏭</div><span>Gas Leak Monitor</span></div>
+      <div class="navbar-brand">
+        <div class="brand-icon">🏭</div><span>Gas Leak Monitor</span>
+      </div>
       <div class="navbar-status">
         <div class="connection-status">
           <span id="status-dot" class="status-dot"></span>
@@ -66,7 +70,9 @@
               <button class="btn-chip" data-limit="200">200 mẫu</button>
             </div>
           </div>
-          <div class="chart-wrapper"><div id="gas-chart"></div></div>
+          <div class="chart-wrapper">
+            <div id="gas-chart"></div>
+          </div>
         </section>
 
         <section class="card control-card buzzer-control-card">
@@ -79,7 +85,8 @@
                 <div class="control-icon buzzer">🔔</div>
                 <div>
                   <div class="control-name">Còi Buzzer</div>
-                  <div class="control-status">Trạng thái: <span id="buzzer-status-text" class="status-text off">CHƯA XÁC ĐỊNH</span></div>
+                  <div class="control-status">Trạng thái: <span id="buzzer-status-text" class="status-text off">CHƯA XÁC
+                      ĐỊNH</span></div>
                   <div class="control-status">Lý do: <span id="buzzer-reason" class="status-text">UNKNOWN</span></div>
                 </div>
               </div>
@@ -88,7 +95,8 @@
                 <span class="toggle-slider"></span>
               </label>
             </div>
-            <p class="control-note">Cảnh báo gas có ưu tiên cao nhất. Lệnh OFF không thể tắt còi khi lý do là GAS_ALARM.</p>
+            <p class="control-note">Cảnh báo gas có ưu tiên cao nhất. Lệnh OFF không thể tắt còi khi lý do là GAS_ALARM.
+            </p>
           </div>
         </section>
 
@@ -112,7 +120,8 @@
                 <div class="control-icon led">🌈</div>
                 <div>
                   <div class="control-name">RGB LED</div>
-                  <div class="control-status">Trạng thái: <span id="led-status-text" class="status-text">CHƯA XÁC ĐỊNH</span></div>
+                  <div class="control-status">Trạng thái: <span id="led-status-text" class="status-text">CHƯA XÁC
+                      ĐỊNH</span></div>
                 </div>
               </div>
               <label class="toggle-switch">
@@ -120,7 +129,8 @@
                 <span class="toggle-slider"></span>
               </label>
             </div>
-            <p class="control-note">Khi bật, màu LED tự động theo trạng thái gas và kết nối. Không hỗ trợ chọn màu thủ công.</p>
+            <p class="control-note">Khi bật, màu LED tự động theo trạng thái gas và kết nối. Không hỗ trợ chọn màu thủ
+              công.</p>
           </div>
         </section>
 
@@ -145,4 +155,5 @@
   <script src="js/api.js"></script>
   <script src="js/dashboard.js?v=20260815-2"></script>
 </body>
+
 </html>
